@@ -38,6 +38,8 @@ import re
 import ujson
 
 from zerver.lib.rest import rest_dispatch as _rest_dispatch
+from six.moves import map
+import six
 rest_dispatch = csrf_exempt((lambda request, *args, **kwargs: _rest_dispatch(request, globals(), *args, **kwargs)))
 
 # This is a Pool that doesn't close connections.  Therefore it can be used with
@@ -50,7 +52,7 @@ class NonClosingPool(sqlalchemy.pool.NullPool):
         pass
 
     def recreate(self):
-        return self.__class__(creator=self._creator,
+        return self.__class__(creator=self._creator, # type: ignore # __class__
                               recycle=self._recycle,
                               use_threadlocal=self._use_threadlocal,
                               reset_on_return=self._reset_on_return,
@@ -72,10 +74,6 @@ def get_sqlalchemy_connection():
     sa_connection = sqlalchemy_engine.connect()
     sa_connection.execution_options(autocommit=False)
     return sa_connection
-
-@authenticated_json_post_view
-def json_get_old_messages(request, user_profile):
-    return get_old_messages_backend(request, user_profile)
 
 class BadNarrowOperator(Exception):
     def __init__(self, desc):
@@ -184,8 +182,8 @@ class NarrowBuilder(object):
             matching_streams = get_active_streams(self.user_profile.realm).filter(
                 name__iregex=r'^(un)*%s(\.d)*$' % (self._pg_re_escape(base_stream_name),))
             matching_stream_ids = [matching_stream.id for matching_stream in matching_streams]
-            recipients = bulk_get_recipients(Recipient.STREAM, matching_stream_ids).values()
-            cond = column("recipient_id").in_([recipient.id for recipient in recipients])
+            recipients_map = bulk_get_recipients(Recipient.STREAM, matching_stream_ids)
+            cond = column("recipient_id").in_([recipient.id for recipient in recipients_map.values()])
             return query.where(maybe_negate(cond))
 
         recipient = get_recipient(Recipient.STREAM, type_id=stream.id)
@@ -291,7 +289,7 @@ class NarrowBuilder(object):
         return query.where(maybe_negate(cond))
 
 def highlight_string(string, locs):
-    if isinstance(string, unicode):
+    if isinstance(string, six.text_type):
         string = string.encode('utf-8')
 
     highlight_start = '<span class="highlight">'
@@ -325,7 +323,7 @@ def narrow_parameter(json):
         # We have to support a legacy tuple format.
         if isinstance(elem, list):
             if (len(elem) != 2
-                or any(not isinstance(x, str) and not isinstance(x, unicode)
+                or any(not isinstance(x, str) and not isinstance(x, six.text_type)
                        for x in elem)):
                 raise ValueError("element is not a string pair")
             return dict(operator=elem[0], operand=elem[1])
@@ -349,7 +347,7 @@ def narrow_parameter(json):
 
         raise ValueError("element is not a dictionary")
 
-    return map(convert_term, data)
+    return list(map(convert_term, data))
 
 def is_public_stream(stream, realm):
     if not valid_stream_name(stream):
@@ -403,7 +401,7 @@ def exclude_muting_conditions(user_profile, narrow):
             in_home_view=False,
             recipient__type=Recipient.STREAM
         ).values('recipient_id')
-        muted_recipient_ids = map(lambda row: row['recipient_id'], rows)
+        muted_recipient_ids = [row['recipient_id'] for row in rows]
         condition = not_(column("recipient_id").in_(muted_recipient_ids))
         conditions.append(condition)
 
@@ -417,9 +415,9 @@ def exclude_muting_conditions(user_profile, narrow):
         muted_streams = bulk_get_streams(user_profile.realm,
                                          [muted[0] for muted in muted_topics])
         muted_recipients = bulk_get_recipients(Recipient.STREAM,
-                                               [stream.id for stream in muted_streams.itervalues()])
+                                               [stream.id for stream in six.itervalues(muted_streams)])
         recipient_map = dict((s.name.lower(), muted_recipients[s.id].id)
-                             for s in muted_streams.itervalues())
+                             for s in six.itervalues(muted_streams))
 
         muted_topics = [m for m in muted_topics if m[0].lower() in recipient_map]
 
@@ -429,7 +427,7 @@ def exclude_muting_conditions(user_profile, narrow):
                 topic_cond = func.upper(column("subject")) == func.upper(muted[1])
                 return and_(stream_cond, topic_cond)
 
-            condition = not_(or_(*map(mute_cond, muted_topics)))
+            condition = not_(or_(*list(map(mute_cond, muted_topics))))
             return conditions + [condition]
 
     return conditions
@@ -546,11 +544,11 @@ def get_old_messages_backend(request, user_profile,
     # 'user_messages' dictionary maps each message to the user's
     # UserMessage object for that message, which we will attach to the
     # rendered message dict before returning it.  We attempt to
-    # bulk-fetch rendered message dicts from memcached using the
+    # bulk-fetch rendered message dicts from remote cache using the
     # 'messages' list.
-    search_fields = dict()
-    message_ids = []
-    user_message_flags = {}
+    search_fields = dict() # type: Dict[int, Dict[str, str]]
+    message_ids = [] # type: List[int]
+    user_message_flags = {} # type: Dict[int, List[str]]
     if include_history:
         message_ids = [row[0] for row in query_result]
 
@@ -602,10 +600,6 @@ def get_old_messages_backend(request, user_profile,
            "result": "success",
            "msg": ""}
     return json_success(ret)
-
-@authenticated_json_post_view
-def json_update_flags(request, user_profile):
-    return update_message_flags(request, user_profile);
 
 @has_request_variables
 def update_message_flags(request, user_profile,
@@ -697,10 +691,6 @@ def same_realm_jabber_user(user_profile, email):
 
 @authenticated_api_view
 def api_send_message(request, user_profile):
-    return send_message_backend(request, user_profile)
-
-@authenticated_json_post_view
-def json_send_message(request, user_profile):
     return send_message_backend(request, user_profile)
 
 # We do not @require_login for send_message_backend, since it is used

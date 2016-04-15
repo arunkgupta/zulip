@@ -10,6 +10,7 @@ var load_more_enabled = true;
 
 // used for our URL rewriting in insert_new_messages
 var humbug_images_re = new RegExp("https://humbug-user-uploads.s3.amazonaws.com/([^\"]+)", 'g');
+exports.recent_private_messages = [];
 
 exports.get = function get(message_id) {
     return stored_messages[message_id];
@@ -56,6 +57,25 @@ exports.process_message_for_recent_subjects = function process_message_for_recen
     });
 
     recent_subjects.set(stream, recents);
+};
+
+exports.process_message_for_recent_private_messages = function process_message_for_recent_private_messages(message, remove_message) {
+    var current_timestamp = 0;
+
+    // If this conversation is already tracked, we'll replace with new timestamp,
+    // so remove it from the current list.
+    exports.recent_private_messages = _.filter(exports.recent_private_messages, function (recent_pm) {
+        return recent_pm.reply_to !== message.reply_to;
+    });
+
+    var new_conversation = {reply_to: message.reply_to,
+                            display_reply_to: message.display_reply_to,
+                            timestamp: Math.max(message.timestamp, current_timestamp)};
+
+    exports.recent_private_messages.push(new_conversation);
+    exports.recent_private_messages.sort(function (a, b) {
+        return b.timestamp - a.timestamp;
+    });
 };
 
 function set_topic_edit_properties(message) {
@@ -120,6 +140,7 @@ function add_message_metadata(message) {
                 get_private_message_recipient(message, 'email'));
         message.display_reply_to = get_private_message_recipient(message, 'full_name', 'email');
 
+        exports.process_message_for_recent_private_messages(message);
         involved_people = message.display_recipient;
         break;
     }
@@ -333,6 +354,7 @@ exports.update_messages = function update_messages(events) {
     }
     unread.update_unread_counts();
     stream_list.update_streams_sidebar();
+    stream_list.update_private_messages();
 };
 
 exports.insert_new_messages = function insert_new_messages(messages) {
@@ -366,7 +388,7 @@ exports.insert_new_messages = function insert_new_messages(messages) {
 
         // Iterate backwards to find the last message sent_by_me, stopping at
         // the pointer position.
-        for (i = messages.length-1; i>=0; i--){
+        for (i = messages.length-1; i>=0; i--) {
             var id = messages[i].id;
             if (id <= selected_id) {
                 break;
@@ -383,6 +405,7 @@ exports.insert_new_messages = function insert_new_messages(messages) {
     unread.process_visible();
     notifications.received_messages(messages);
     stream_list.update_streams_sidebar();
+    stream_list.update_private_messages();
 };
 
 function process_result(messages, opts) {
@@ -410,6 +433,7 @@ function process_result(messages, opts) {
     }
 
     stream_list.update_streams_sidebar();
+    stream_list.update_private_messages();
 
     if (opts.cont !== undefined) {
         opts.cont(messages);
@@ -465,8 +489,8 @@ exports.load_old_messages = function load_old_messages(opts) {
         data.use_first_unread_anchor = true;
     }
 
-    channel.post({
-        url:      '/json/get_old_messages',
+    channel.get({
+        url:      '/json/messages',
         data:     data,
         idempotent: true,
         success: function (data) {
@@ -499,7 +523,7 @@ exports.load_old_messages = function load_old_messages(opts) {
 
 exports.reset_load_more_status = function reset_load_more_status() {
     load_more_enabled = true;
-    have_scrolled_away_from_top = true;
+    ui.have_scrolled_away_from_top = true;
     ui.hide_loading_more_messages_indicator();
 };
 
@@ -594,8 +618,8 @@ util.execute_early(function () {
 
     $(document).on('message_id_changed', function (event) {
         var old_id = event.old_id, new_id = event.new_id;
-        if (furthest_read === old_id) {
-            furthest_read = new_id;
+        if (pointer.furthest_read === old_id) {
+            pointer.furthest_read = new_id;
         }
         if (stored_messages[old_id]) {
             stored_messages[new_id] = stored_messages[old_id];

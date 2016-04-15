@@ -1,4 +1,5 @@
 from __future__ import absolute_import
+from __future__ import print_function
 
 from optparse import make_option
 
@@ -22,7 +23,7 @@ class Command(BaseCommand):
 This command should be used only on a newly created, empty Zulip instance to
 import a database dump from one or more JSON files.
 
-Usage: python manage.py import_dump [--destroy-rebuild-database] [--chunk-size=%s] <json file name> [<json file name>...]""" % DEFAULT_CHUNK_SIZE
+Usage: python2.7 manage.py import_dump [--destroy-rebuild-database] [--chunk-size=%s] <json file name> [<json file name>...]""" % (DEFAULT_CHUNK_SIZE,)
 
     option_list = BaseCommand.option_list + (
         make_option('--destroy-rebuild-database',
@@ -41,9 +42,9 @@ Usage: python manage.py import_dump [--destroy-rebuild-database] [--chunk-size=%
     def new_instance_check(self, model):
         count = model.objects.count()
         if count:
-            print "Zulip instance is not empty, found %d rows in %s table. " \
-                % (count, model._meta.db_table)
-            print "You may use --destroy-rebuild-database to destroy and rebuild the database prior to import."
+            print("Zulip instance is not empty, found %d rows in %s table. " \
+                % (count, model._meta.db_table))
+            print("You may use --destroy-rebuild-database to destroy and rebuild the database prior to import.")
             exit(1)
 
 
@@ -58,19 +59,19 @@ Usage: python manage.py import_dump [--destroy-rebuild-database] [--chunk-size=%
 
     def test_table_row_count(self, row_counter, model):
         table_name = model._meta.db_table
-        sys.stdout.write("%s: " % table_name)
+        sys.stdout.write("%s: " % (table_name,))
         expected_count = row_counter.get(table_name) or 0
         actual_count = model.objects.count()
         status = "PASSED" if expected_count == actual_count else "FAILED"
-        params = (expected_count, actual_count, status)
-        sys.stdout.write("expected %d rows, got %d. %s\n" % params)
+        sys.stdout.write("expected %d rows, got %d. %s\n" %
+                         (expected_count, actual_count, status))
 
 
     def import_table(self, database_dump, realm_notification_map, model):
         table_name = model._meta.db_table
         if table_name in database_dump:
             cursor = connection.cursor()
-            sys.stdout.write("Importing %s: " % table_name)
+            sys.stdout.write("Importing %s: " % (table_name,))
             accumulator = [ ]
             for row in database_dump[table_name]:
                 # hack to filter out notifications_stream_id circular reference
@@ -106,11 +107,11 @@ Usage: python manage.py import_dump [--destroy-rebuild-database] [--chunk-size=%
             Client, Message, UserMessage, Huddle, DefaultStream, RealmAlias,
             RealmFilter]
 
-        self.chunk_size = options["chunk_size"]
+        self.chunk_size = options["chunk_size"] # type: int # ignore mypy options bug
         encoding = sys.getfilesystemencoding()
 
         if len(args) == 0:
-            print "Please provide at least one database dump file name."
+            print("Please provide at least one database dump file name.")
             exit(1)
 
         if not options["destroy_rebuild_database"]:
@@ -123,20 +124,20 @@ Usage: python manage.py import_dump [--destroy-rebuild-database] [--chunk-size=%
         # maps relationship between realm id and notifications_stream_id
         # generally, there should be only one realm per dump, but the code
         # doesn't make that assumption
-        realm_notification_map = dict()
+        realm_notification_map = dict() # type: Dict[int, int]
 
         # maping between table name and a total expected number of rows across
         # all input json files
-        row_counter = dict()
+        row_counter = dict() # type: Dict[str, int]
 
         for file_name in args:
             try:
                 fp = open(file_name, 'r')
             except IOError:
-                print "File not found: '%s'" % (file_name,)
+                print("File not found: '%s'" % (file_name,))
                 exit(1)
 
-            print "Processing file: %s ..." % (file_name,)
+            print("Processing file: %s ..." % (file_name,))
 
             # parse the database dump and load in memory
             # TODO: change this to a streaming parser to support loads > RAM size
@@ -146,19 +147,19 @@ Usage: python manage.py import_dump [--destroy-rebuild-database] [--chunk-size=%
                 self.increment_row_counter(row_counter, database_dump, model)
                 self.import_table(database_dump, realm_notification_map, model)
 
-            print ""
+            print("")
 
         # set notifications_stream_id on realm objects to correct value now
         # that foreign keys are in streams table
         if len(realm_notification_map):
-            print "Setting realm notification stream..."
+            print("Setting realm notification stream...")
             for id, notifications_stream_id in realm_notification_map.items():
                 Realm.objects \
                     .filter(id=id) \
                     .update(notifications_stream = notifications_stream_id)
 
-        print ""
-        print "Testing data import: "
+        print("")
+        print("Testing data import: ")
 
         # test that everything from all json dumps made it into the database
         for model in models_to_import:

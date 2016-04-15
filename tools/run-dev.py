@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2.7
 import optparse
 import subprocess
 import signal
@@ -14,9 +14,8 @@ from twisted.web      import proxy, server, resource
 from twisted.web.http import Request
 orig_finish = Request.finish
 def patched_finish(self):
-    if self._disconnected:
-        return
-    return orig_finish(self)
+    if not self._disconnected:
+        orig_finish(self)
 Request.finish = patched_finish
 
 if 'posix' in os.name and os.geteuid() == 0:
@@ -47,7 +46,6 @@ parser.add_option('--interface',
 (options, args) = parser.parse_args()
 
 base_port   = 9991
-manage_args = ''
 if options.test:
     base_port   = 9981
     settings_module = "zproject.test_settings"
@@ -62,6 +60,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 proxy_port   = base_port
 django_port  = base_port+1
 tornado_port = base_port+2
+webpack_port = base_port+3
 
 os.chdir(os.path.join(os.path.dirname(__file__), '..'))
 
@@ -75,7 +74,8 @@ os.setpgrp()
 # Pass --nostatic because we configure static serving ourselves in
 # zulip/urls.py.
 cmds = [['./tools/compile-handlebars-templates', 'forever'],
-        ['python', 'manage.py', 'runserver', '--nostatic'] +
+        ['./tools/webpack', '--watch', '--port', str(webpack_port)],
+        ['python', 'manage.py', 'rundjango'] +
           manage_args + ['localhost:%d' % (django_port,)],
         ['python', 'manage.py', 'runtornado'] +
           manage_args + ['localhost:%d' % (tornado_port,)],
@@ -97,6 +97,10 @@ class Resource(resource.Resource):
             request.uri.startswith('/api/v1/events') or
             request.uri.startswith('/sockjs')):
             return proxy.ReverseProxyResource('localhost', tornado_port, '/'+name)
+
+        elif (request.uri.startswith('/webpack') or
+              request.uri.startswith('/socket.io')):
+            return proxy.ReverseProxyResource('localhost', webpack_port, '/'+name)
 
         return proxy.ReverseProxyResource('localhost', django_port, '/'+name)
 

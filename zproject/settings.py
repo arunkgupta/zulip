@@ -1,3 +1,4 @@
+from __future__ import absolute_import
 # Django settings for zulip project.
 ########################################################################
 # Here's how settings for the Zulip project work:
@@ -11,22 +12,23 @@ import os
 import platform
 import time
 import sys
-import ConfigParser
+import six.moves.configparser
 
 from zerver.lib.db import TimeTrackingConnection
+import six
 
 ########################################################################
 # INITIAL SETTINGS
 ########################################################################
 
-config_file = ConfigParser.RawConfigParser()
+config_file = six.moves.configparser.RawConfigParser()
 config_file.read("/etc/zulip/zulip.conf")
 
 # Whether this instance of Zulip is running in a production environment.
 PRODUCTION = config_file.has_option('machine', 'deploy_type')
 DEVELOPMENT = not PRODUCTION
 
-secrets_file = ConfigParser.RawConfigParser()
+secrets_file = six.moves.configparser.RawConfigParser()
 if PRODUCTION:
     secrets_file.read("/etc/zulip/zulip-secrets.conf")
 else:
@@ -76,11 +78,12 @@ TUTORIAL_ENABLED = True
 # Import variables like secrets from the local_settings file
 # Import local_settings after determining the deployment/machine type
 if PRODUCTION:
-    from local_settings import *
+    from .local_settings import *
 else:
     # For the Dev VM environment, we use the same settings as the
     # sample local_settings.py file, with a few exceptions.
-    from local_settings_template import *
+    from .local_settings_template import *
+    LOCAL_UPLOADS_DIR = 'uploads'
     EXTERNAL_HOST = 'localhost:9991'
     ALLOWED_HOSTS = ['localhost']
     AUTHENTICATION_BACKENDS = ('zproject.backends.DevAuthBackend',)
@@ -119,11 +122,18 @@ DEFAULT_SETTINGS = {'TWITTER_CONSUMER_KEY': '',
                     'S3_BUCKET': '',
                     'S3_AVATAR_BUCKET': '',
                     'LOCAL_UPLOADS_DIR': None,
+                    'MAX_FILE_UPLOAD_SIZE': 25,
                     'DROPBOX_APP_KEY': '',
                     'ERROR_REPORTING': True,
                     'JWT_AUTH_KEYS': {},
                     'NAME_CHANGES_DISABLED': False,
                     'DEPLOYMENT_ROLE_NAME': "",
+                    'RABBITMQ_HOST': 'localhost',
+                    'RABBITMQ_USERNAME': 'zulip',
+                    'MEMCACHED_LOCATION': '127.0.0.1:11211',
+                    'RATE_LIMITING': True,
+                    'REDIS_HOST': '127.0.0.1',
+                    'REDIS_PORT': 6379,
                     # The following bots only exist in non-VOYAGER installs
                     'ERROR_BOT': None,
                     'NEW_USER_BOT': None,
@@ -148,11 +158,12 @@ DEFAULT_SETTINGS = {'TWITTER_CONSUMER_KEY': '',
                     'ZULIP_COM_STAGING': False,
                     'STATSD_HOST': '',
                     'REMOTE_POSTGRES_HOST': '',
+                    'REMOTE_POSTGRES_SSLMODE': '',
                     'GOOGLE_CLIENT_ID': '',
                     'DBX_APNS_CERT_FILE': None,
                     }
 
-for setting_name, setting_val in DEFAULT_SETTINGS.iteritems():
+for setting_name, setting_val in six.iteritems(DEFAULT_SETTINGS):
     if not setting_name in vars():
         vars()[setting_name] = setting_val
 
@@ -217,6 +228,7 @@ USE_TZ = True
 
 DEPLOY_ROOT = os.path.join(os.path.realpath(os.path.dirname(__file__)), '..')
 TEMPLATE_DIRS = ( os.path.join(DEPLOY_ROOT, 'templates'), )
+LOCALE_PATHS = ( os.path.join(DEPLOY_ROOT, 'locale'), )
 
 # Make redirects work properly behind a reverse proxy
 USE_X_FORWARDED_HOST = True
@@ -309,14 +321,20 @@ elif REMOTE_POSTGRES_HOST != '':
     DATABASES['default'].update({
             'HOST': REMOTE_POSTGRES_HOST,
             })
-    DATABASES['default']['OPTIONS']['sslmode'] = 'verify-full'
+    if get_secret("postgres_password") is not None:
+        DATABASES['default'].update({
+            'PASSWORD': get_secret("postgres_password"),
+            })
+    if REMOTE_POSTGRES_SSLMODE != '':
+        DATABASES['default']['OPTIONS']['sslmode'] = REMOTE_POSTGRES_SSLMODE
+    else:
+        DATABASES['default']['OPTIONS']['sslmode'] = 'verify-full'
 
 ########################################################################
 # RABBITMQ CONFIGURATION
 ########################################################################
 
 USING_RABBITMQ = True
-RABBITMQ_USERNAME = 'zulip'
 RABBITMQ_PASSWORD = get_secret("rabbitmq_password")
 
 ########################################################################
@@ -328,7 +346,7 @@ SESSION_ENGINE = "django.contrib.sessions.backends.cached_db"
 CACHES = {
     'default': {
         'BACKEND':  'django.core.cache.backends.memcached.PyLibMCCache',
-        'LOCATION': '127.0.0.1:11211',
+        'LOCATION': MEMCACHED_LOCATION,
         'TIMEOUT':  3600
     },
     'database': {
@@ -347,10 +365,6 @@ CACHES = {
 ########################################################################
 # REDIS-BASED RATE LIMITING CONFIGURATION
 ########################################################################
-
-RATE_LIMITING = True
-REDIS_HOST = '127.0.0.1'
-REDIS_PORT = 6379
 
 RATE_LIMITING_RULES = [
     (60, 100),     # 100 requests max every minute
@@ -373,7 +387,7 @@ try:
     domain = config_file.get('django', 'cookie_domain')
     SESSION_COOKIE_DOMAIN = '.' + domain
     CSRF_COOKIE_DOMAIN    = '.' + domain
-except ConfigParser.Error:
+except six.moves.configparser.Error:
     # Failing here is OK
     pass
 
@@ -448,7 +462,7 @@ INTERNAL_BOT_DOMAIN = "zulip.com"
 
 # Set the realm-specific bot names
 for bot in INTERNAL_BOTS:
-    if not bot['var_name'] in vars():
+    if vars().get(bot['var_name']) is None:
         bot_email = bot['email_template'] % (INTERNAL_BOT_DOMAIN,)
         vars()[bot['var_name'] ] = bot_email
 
@@ -666,6 +680,7 @@ JS_SPECS = {
             'js/resize.js',
             'js/floating_recipient_bar.js',
             'js/ui.js',
+            'js/pointer.js',
             'js/click_handlers.js',
             'js/scroll_bar.js',
             'js/gear_menu.js',
@@ -702,6 +717,7 @@ JS_SPECS = {
             'js/referral.js',
             'js/custom_markdown.js',
             'js/bot_data.js',
+            # JS bundled by webpack is also included here if PIPELINE setting is true
         ],
         'output_filename': 'min/app.js'
     },
@@ -717,6 +733,9 @@ JS_SPECS = {
         'output_filename': 'min/sockjs-0.3.4.min.js'
     },
 }
+
+if PIPELINE:
+    JS_SPECS['app']['source_filenames'].append('js/bundle.js')
 
 app_srcs = JS_SPECS['app']['source_filenames']
 
@@ -794,7 +813,7 @@ LOGGING = {
     'handlers': {
         'zulip_admins': {
             'level':     'ERROR',
-            'class':     'zerver.handlers.AdminZulipHandler',
+            'class':     'zerver.logging_handlers.AdminZulipHandler',
             # For testing the handler delete the next line
             'filters':   ['ZulipLimiter', 'require_debug_false', 'require_really_deployed'],
             'formatter': 'default'
@@ -840,9 +859,19 @@ LOGGING = {
             'level':    'INFO',
             'propagate': False,
         },
+        'zulip.queue': {
+            'handlers': ['console', 'file', 'errors_file'],
+            'level':    'WARNING',
+            'propagate': False,
+        },
         'zulip.management': {
             'handlers': ['file', 'errors_file'],
             'level':    'INFO',
+            'propagate': False,
+        },
+        'requests': {
+            'handlers': ['console', 'file', 'errors_file'],
+            'level':    'WARNING',
             'propagate': False,
         },
         ## Uncomment the following to get all database queries logged to the console
@@ -912,6 +941,10 @@ else:
     EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 
 EMAIL_HOST_PASSWORD = get_secret('email_password')
+if "EMAIL_GATEWAY_PASSWORD" not in vars():
+    EMAIL_GATEWAY_PASSWORD = get_secret('email_gateway_password')
+if "AUTH_LDAP_BIND_PASSWORD" not in vars():
+    AUTH_LDAP_BIND_PASSWORD = get_secret('auth_ldap_bind_password')
 
 ########################################################################
 # MISC SETTINGS

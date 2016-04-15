@@ -1,4 +1,5 @@
 from __future__ import absolute_import
+from __future__ import print_function
 
 from optparse import make_option
 
@@ -34,7 +35,7 @@ class Command(BaseCommand):
     def handle(self, **options):
         if options["domain"] is None or options["stream"] is None or \
                 (options["users"] is None and options["all_users"] is None):
-            self.print_help("python manage.py", "remove_users_from_stream")
+            self.print_help("python2.7 manage.py", "remove_users_from_stream")
             exit(1)
 
         realm = get_realm(options["domain"])
@@ -51,6 +52,6 @@ class Command(BaseCommand):
 
         for user_profile in user_profiles:
             did_remove = do_remove_subscription(user_profile, stream)
-            print "%s %s from %s" % (
+            print("%s %s from %s" % (
                 "Removed" if did_remove else "Couldn't remove",
-                user_profile.email, stream_name)
+                user_profile.email, stream_name))

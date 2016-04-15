@@ -45,27 +45,35 @@ AUTHENTICATION_BACKENDS = (
 # SSO_APPEND_DOMAIN = "example.com")
 SSO_APPEND_DOMAIN = None
 
-# Configure the outgoing SMTP server below. The default configuration
-# is prepopulated for GMail servers.  Change EMAIL_HOST for other
-# hosts, or leave it unset or empty to skip sending email.  Note if
-# you are using a GMail account to send outgoing email, you will
-# likely need to configure that account as "less secure" here:
-# https://support.google.com/accounts/answer/6010255.
+# Configure the outgoing SMTP server below. For testing, you can skip
+# sending emails entirely by commenting out EMAIL_HOST, but you will
+# want to configure this to support email address confirmation emails,
+# missed message emails, onboarding follow-up emails, etc. To
+# configure SMTP, you will need to complete the following steps:
 #
-# With the exception of reading EMAIL_HOST_PASSWORD from the Zulip
-# secrets file, Zulip uses Django's standard EmailBackend, so if
-# you're having issues, you may want to search for documentation on
-# using your email provider with Django.
+# (1) Fill out the outgoing email sending configuration below.
 #
-# A common problem you may encounter when trying to get this working
-# is that some hosting providers block outgoing SMTP traffic.
+# (2) Put the SMTP password for EMAIL_HOST_USER in
+# /etc/zulip/zulip-secrets.conf as email_password.
+#
+# (3) If you are using a gmail account to send outgoing email, you
+# will likely need to read this Google support answer and configure
+# that account as "less secure":
+# https://support.google.com/mail/answer/14257.
+#
+# You can quickly test your sending email configuration using:
+#   ./manage.py send_test_email username@example.com
+#
+# A common problem is hosting providers that block outgoing SMTP traffic.
+#
+# With the exception of reading EMAIL_HOST_PASSWORD from
+# email_password in the Zulip secrets file, Zulip uses Django's
+# standard EmailBackend, so if you're having issues, you may want to
+# search for documentation on using your email provider with Django.
 EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_HOST_USER = ''
-# If you're using password auth, you will need to put the password in
-# /etc/zulip/zulip-secrets.conf as email_password.
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
-
 # The email From address to be used for automatically generated emails
 DEFAULT_FROM_EMAIL = "Zulip <zulip@example.com>"
 # The noreply address to be used as Reply-To for certain generated emails.
@@ -77,7 +85,7 @@ NOREPLY_EMAIL_ADDRESS = "noreply@example.com"
 # domains/IP addresses for your site. This is a security measure to
 # prevent an attacker from poisoning caches and triggering password
 # reset emails with links to malicious hosts by submitting requests
-# with a fake HTTP Host header.
+# with a fake HTTP Host header. You must include 'localhost' here.
 ALLOWED_HOSTS = ['*']
 
 ### OPTIONAL SETTINGS
@@ -109,12 +117,27 @@ INLINE_IMAGE_PREVIEW = True
 
 # By default, files uploaded by users and user avatars are stored
 # directly on the Zulip server.  If file storage in Amazon S3 is
-# desired, you can configure that by setting s3_key and s3_secret_key
-# in /etc/zulip/zulip-secrets.conf to be the S3 access and secret keys
-# that you want to use, and setting the S3_AUTH_UPLOADS_BUCKET and
-# S3_AVATAR_BUCKET to be the S3 buckets you've created to store file
-# uploads and user avatars, respectively.
+# desired, you can configure that as follows:
+#
+# (1) Set s3_key and s3_secret_key in /etc/zulip/zulip-secrets.conf to
+# be the S3 access and secret keys that you want to use, and setting
+# the S3_AUTH_UPLOADS_BUCKET and S3_AVATAR_BUCKET to be the S3 buckets
+# you've created to store file uploads and user avatars, respectively.
+# Then restart Zulip (scripts/restart-zulip).
+#
+# (2) Edit /etc/nginx/sites-available/zulip-enterprise to comment out
+# the nginx configuration for /user_uploads and /user_avatars (see
+# https://github.com/zulip/zulip/issues/291 for discussion of a better
+# solution that won't be automatically reverted by the Zulip upgrade
+# script), and then restart nginx.
 LOCAL_UPLOADS_DIR = "/home/zulip/uploads"
+#S3_AUTH_UPLOADS_BUCKET = ""
+#S3_AVATAR_BUCKET = ""
+
+# Maximum allowed size of uploaded files, in megabytes.  DO NOT SET
+# ABOVE 80MB.  The file upload implementation doesn't support chunked
+# uploads, so browsers will crash if you try uploading larger files.
+MAX_FILE_UPLOAD_SIZE = 25
 
 # Controls whether name changes are completely disabled for this installation
 # This is useful in settings where you're syncing names from an integrated LDAP/Active Directory
@@ -128,6 +151,19 @@ ENABLE_GRAVATAR = True
 # custom default avatar image at /home/zulip/local-static/default-avatar.png
 # and uncomment the following line.
 #DEFAULT_AVATAR_URI = '/local-static/default-avatar.png'
+
+# To access an external postgres database you should define the host name in
+# REMOTE_POSTGRES_HOST, you can define the password in the secrets file in the
+# property postgres_password, and the SSL connection mode in REMOTE_POSTGRES_SSLMODE
+# Different options are:
+#   disable: I don't care about security, and I don't want to pay the overhead of encryption.
+#   allow: I don't care about security, but I will pay the overhead of encryption if the server insists on it.
+#   prefer: I don't care about encryption, but I wish to pay the overhead of encryption if the server supports it.
+#   require: I want my data to be encrypted, and I accept the overhead. I trust that the network will make sure I always connect to the server I want.
+#   verify-ca: I want my data encrypted, and I accept the overhead. I want to be sure that I connect to a server that I trust.
+#   verify-full: I want my data encrypted, and I accept the overhead. I want to be sure that I connect to a server I trust, and that it's the one I specify.
+#REMOTE_POSTGRES_HOST = 'dbserver.example.com'
+#REMOTE_POSTGRES_SSLMODE = 'require'
 
 ### TWITTER INTEGRATION
 
@@ -145,45 +181,51 @@ ENABLE_GRAVATAR = True
 
 ### EMAIL GATEWAY INTEGRATION
 
-# The email gateway provides, for each stream, an email address that
-# you can send email to in order to have the email's content be posted
-# to that stream.  Emails received at the per-stream email address
-# will be converted into a Zulip message
-
-# There are two ways to make use of local email mirroring:
+# The Email gateway integration supports sending messages into Zulip
+# by sending an email.  This is useful for receiving notifications
+# from third-party services that only send outgoing notifications via
+# email.  Once this integration is configured, each stream will have
+# an email address documented on the stream settings page an emails
+# sent to that address will be delivered into the stream.
+#
+# There are two ways to configure email mirroring in Zulip:
 #  1. Local delivery: A MTA runs locally and passes mail directly to Zulip
 #  2. Polling: Checks an IMAP inbox every minute for new messages.
-
-# A Puppet manifest for local delivery via Postfix is available in
-# puppet/zulip/manifests/postfix_localmail.pp. To use the manifest, add it to
-# puppet_classes in /etc/zulip/zulip.conf. This manifest assumes you'll receive
-# mail addressed to the hostname of your Zulip server.
 #
-# Users of other mail servers will need to configure it to pass mail to the
-# email mirror; see `python manage.py email-mirror --help` for details.
-
-# The email address pattern to use for auto-generated stream emails
-# The %s will be replaced with a unique token, and the resulting email
-# must be delivered to the EMAIL_GATEWAY_IMAP_FOLDER of the
-# EMAIL_GATEWAY_LOGIN account below, or piped in to the email-mirror management
-# command as indicated above.
+# The local delivery configuration is preferred for production because
+# it supports nicer looking email addresses and has no cron delay,
+# while the polling mechanism is better for testing/developing this
+# feature because it doesn't require a public-facing IP/DNS setup.
 #
-# Example: zulip+%s@example.com
+# The main email mirror setting is the email address pattern, where
+# you specify the email address format you'd like the integration to
+# use.  It should be one of the following:
+#   %s@zulip.example.com (for local delivery)
+#   username+%s@example.com (for polling if EMAIL_GATEWAY_LOGIN=username@example.com)
 EMAIL_GATEWAY_PATTERN = ""
-
-
-# The following options are relevant if you're using mail polling.
 #
-# A sample cron job for mail polling is available at puppet/zulip/files/cron.d/email-mirror
+# If you are using local delivery, EMAIL_GATEWAY_PATTERN is all you need
+# to change in this file.  You will also need to enable the Zulip postfix
+# configuration to support local delivery by adding
+#   , zulip::postfix_localmail
+# to puppet_classes in /etc/zulip/zulip.conf and then running
+# `scripts/zulip-puppet-apply -f` to do the installation.
 #
-# The Zulip username of the bot that the email pattern should post as.
-# Example: emailgateway@example.com
-EMAIL_GATEWAY_BOT = ""
-
-# Configuration of the email mirror mailbox
-# The IMAP login and password
+# If you are using polling, you will need to setup an IMAP email
+# account dedicated to Zulip email gateway messages.  The model is
+# that users will send emails to that account via an address of the
+# form username+%s@example.com (which is what you will set as
+# EMAIL_GATEWAY_PATTERN); your email provider should deliver those
+# emails to the username@example.com inbox.  Then you run in a cron
+# job `./manage.py email-mirror` (see puppet/zulip/files/cron.d/email-mirror),
+# which will check that inbox and batch-process any new messages.
+#
+# You will need to configure authentication for the email mirror
+# command to access the IMAP mailbox below and in zulip-secrets.conf.
+#
+# The IMAP login; username here and password as email_gateway_login in
+# zulip-secrets.conf.
 EMAIL_GATEWAY_LOGIN = ""
-EMAIL_GATEWAY_PASSWORD = ""
 # The IMAP server & port to connect to
 EMAIL_GATEWAY_IMAP_SERVER = ""
 EMAIL_GATEWAY_IMAP_PORT = 993
@@ -238,10 +280,10 @@ from django_auth_ldap.config import LDAPSearch, GroupOfNamesType
 # Zulip. Example: "ldaps://ldap.example.com"
 AUTH_LDAP_SERVER_URI = ""
 
-# This DN and password will be used to bind to your server. If unset, anonymous
-# binds are performed.
+# This DN will be used to bind to your server. If unset, anonymous
+# binds are performed.  If set, you need to specify the password as
+# 'auth_ldap_bind_password' in zulip-secrets.conf.
 AUTH_LDAP_BIND_DN = ""
-AUTH_LDAP_BIND_PASSWORD = ""
 
 # Specify the search base and the property to filter on that corresponds to the
 # username.
@@ -259,3 +301,32 @@ AUTH_LDAP_USER_ATTR_MAP = {
 }
 
 CAMO_URI = ''
+
+# RabbitMQ configuration
+#
+# By default, Zulip connects to rabbitmq running locally on the machine,
+# but Zulip also supports connecting to RabbitMQ over the network;
+# to use a remote RabbitMQ instance, set RABBITMQ_HOST here.
+# RABBITMQ_HOST = "localhost"
+# To use another rabbitmq user than the default 'zulip', set RABBITMQ_USERNAME here.
+# RABBITMQ_USERNAME = 'zulip'
+
+# Memcached configuration
+#
+# By default, Zulip connects to memcached running locally on the machine,
+# but Zulip also supports connecting to memcached over the network;
+# to use a remote Memcached instance, set MEMCACHED_LOCATION here.
+# Format HOST:PORT
+# MEMCACHED_LOCATION = 127.0.0.1:11211
+
+# Redis configuration
+#
+# By default, Zulip connects to redis running locally on the machine,
+# but Zulip also supports connecting to redis over the network;
+# to use a remote RabbitMQ instance, set REDIS_HOST here.
+# REDIS_HOST = '127.0.0.1'
+# For a different redis port set the REDIS_PORT here.
+# REDIS_PORT = 6379
+
+# Controls whether Zulip will rate-limit user requests.
+# RATE_LIMITING = True

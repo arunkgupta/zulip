@@ -38,10 +38,6 @@ Files: confirmation/*
 Copyright: 2008, Jarek Zgoda <jarek.zgoda@gmail.com>
 License: BSD-3-Clause
 
-Files: node_modules/handlebars/*
-Copyright: 2011 Yehuda Katz
-License: Expat
-
 Files: puppet/apt/*
 Copyright: 2011, Evolving Web Inc.
 License: Expat
@@ -67,16 +63,16 @@ Copyright: 2006 Otheus Shelling
 License: GPL-2.0
 Comment: Not linked.
 
-Files: puppet/zulip_internal/files/nagios_plugins/check_debian_packages
+Files: puppet/zulip/files/nagios_plugins/zulip_base/check_debian_packages
 Copyright: 2005 Francesc Guasch
 License: GPL-2.0
 Comment: Not linked.
 
-Files: puppet/zulip_internal/files/nagios_plugins/check_postgres.pl
+Files: puppet/zulip/files/nagios_plugins/zulip_postgres_appdb/check_postgres.pl
 Copyright: 2007-2015 Greg Sabino Mullane
 License: BSD-2-Clause
 
-Files: puppet/zulip_internal/files/nagios_plugins/check_website_response.sh
+Files: puppet/zulip/files/nagios_plugins/zulip_nagios_server/check_website_response.sh
 Copyright: 2011 Chris Freeman
 License: GPL-2.0
 
@@ -130,10 +126,6 @@ Files: static/third/gemoji/images/emoji/unicode/* tools/emoji_dump/*.ttf
 Copyright: Google, Inc.
 License: Apache-2.0
 Comment: These are actually Noto Emoji, not gemoji.
-
-Files: static/third/handlebars/handlebars.runtime.js
-Copyright: 2011 Yehuda Katz
-License: Expat
 
 Files: static/third/html5-formdata/formdata.js
 Copyright: 2010 François de Metz
@@ -237,10 +229,6 @@ Files: tools/jslint/jslint.js
 Copyright: 2002 Douglas Crockford
 License: XXX-good-not-evil
 
-Files: tools/python-proxy
-Copyright: 2009 F.bio Domingues
-License: Expat
-
 Files: tools/review
 Copyright: 2010 Ksplice, Inc.
 License: Apache-2.0
@@ -254,12 +242,12 @@ Files: zerver/lib/ccache.py
 Copyright: 2013 David Benjamin and Alan Huang
 License: Expat
 
-Files: zerver/tests/frontend/casperjs/*
+Files: frontend_tests/casperjs/*
 Copyright: 2011-2012 Nicolas Perriault
  Joyent, Inc. and other Node contributors
 License: Expat
 
-Files: zerver/tests/frontend/casperjs/modules/vendors/*
+Files: frontend_tests/casperjs/modules/vendors/*
 Copyright: 2011, Jeremy Ashkenas
 License: Expat
 

@@ -1,3 +1,6 @@
+// This contains zulip's frontend markdown implementation; see
+// docs/markdown.md for docs on our Markdown syntax.
+
 var echo = (function () {
 
 var exports = {};
@@ -196,6 +199,7 @@ exports.edit_locally = function edit_locally(message, raw_content, new_topic) {
         narrowed_msg_list.view.rerender_messages([message]);
     }
     stream_list.update_streams_sidebar();
+    stream_list.update_private_messages();
 };
 
 exports.reify_message_id = function reify_message_id(local_id, server_id) {

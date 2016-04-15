@@ -1,19 +1,23 @@
 from __future__ import absolute_import
+# Zulip's main markdown implementation.  See docs/markdown.md for
+# detailed documentation on our markdown syntax.
+from typing import Any
 
+import codecs
 import markdown
 import logging
 import traceback
-import urlparse
+from six.moves import urllib
 import re
 import os.path
 import glob
 import twitter
 import platform
 import time
-import HTMLParser
+import six.moves.html_parser
 import httplib2
 import itertools
-import urllib
+from six.moves import urllib
 import xml.etree.cElementTree as etree
 
 import hashlib
@@ -33,6 +37,8 @@ from zerver.lib.timeout import timeout, TimeoutExpired
 from zerver.lib.cache import cache_with_key, cache_get_many, cache_set_many
 import zerver.lib.alert_words as alert_words
 import zerver.lib.mention as mention
+import six
+from six.moves import range
 
 
 # Format version of the bugdown rendering; stored along with rendered
@@ -218,7 +224,7 @@ def fetch_open_graph_image(url):
     return {'image': image, 'title': title, 'desc': desc}
 
 def get_tweet_id(url):
-    parsed_url = urlparse.urlparse(url)
+    parsed_url = urllib.parse.urlparse(url)
     if not (parsed_url.netloc == 'twitter.com' or parsed_url.netloc.endswith('.twitter.com')):
         return False
     to_match = parsed_url.path
@@ -240,9 +246,11 @@ class InlineHttpsProcessor(markdown.treeprocessors.Treeprocessor):
             if not url.startswith("http://"):
                 # Don't rewrite images on our own site (e.g. emoji).
                 continue
-            digest = hmac.new(settings.CAMO_KEY, url, hashlib.sha1).hexdigest()
-            encoded_url = url.encode("hex")
-            img.set("src", "%s%s/%s" % (settings.CAMO_URI, digest, encoded_url))
+            encoded_url = url.encode("utf-8")
+            encoded_camo_key = settings.CAMO_KEY.encode("utf-8")
+            digest = hmac.new(encoded_camo_key, encoded_url, hashlib.sha1).hexdigest()
+            hex_encoded_url = codecs.encode(encoded_url, "hex")
+            img.set("src", "%s%s/%s" % (settings.CAMO_URI, digest, hex_encoded_url.decode("utf-8")))
 
 class InlineInterestingLinkProcessor(markdown.treeprocessors.Treeprocessor):
     TWITTER_MAX_IMAGE_HEIGHT = 400
@@ -256,7 +264,7 @@ class InlineInterestingLinkProcessor(markdown.treeprocessors.Treeprocessor):
     def is_image(self, url):
         if not settings.INLINE_IMAGE_PREVIEW:
             return False
-        parsed_url = urlparse.urlparse(url)
+        parsed_url = urllib.parse.urlparse(url)
         # List from http://support.google.com/chromeos/bin/answer.py?hl=en&answer=183093
         for ext in [".bmp", ".gif", ".jpg", "jpeg", ".png", ".webp"]:
             if parsed_url.path.lower().endswith(ext):
@@ -264,7 +272,7 @@ class InlineInterestingLinkProcessor(markdown.treeprocessors.Treeprocessor):
         return False
 
     def dropbox_image(self, url):
-        parsed_url = urlparse.urlparse(url)
+        parsed_url = urllib.parse.urlparse(url)
         if (parsed_url.netloc == 'dropbox.com' or parsed_url.netloc.endswith('.dropbox.com')):
             is_album = parsed_url.path.startswith('/sc/') or parsed_url.path.startswith('/photos/')
             # Only allow preview Dropbox shared links
@@ -307,7 +315,7 @@ class InlineInterestingLinkProcessor(markdown.treeprocessors.Treeprocessor):
             image_info['is_image'] = True
             parsed_url_list = list(parsed_url)
             parsed_url_list[4] = "dl=1" # Replaces query
-            image_info["image"] = urlparse.urlunparse(parsed_url_list)
+            image_info["image"] = urllib.parse.urlunparse(parsed_url_list)
 
             return image_info
         return None
@@ -362,7 +370,7 @@ class InlineInterestingLinkProcessor(markdown.treeprocessors.Treeprocessor):
                 to_linkify.append({
                     'start': match.start(),
                     'end': match.end(),
-                    'url': 'https://twitter.com/' + urllib.quote(screen_name),
+                    'url': 'https://twitter.com/' + urllib.parse.quote(screen_name),
                     'text': mention_string,
                 })
         # Build dicts for media
@@ -377,6 +385,9 @@ class InlineInterestingLinkProcessor(markdown.treeprocessors.Treeprocessor):
                     'text': expanded_url,
                 })
 
+        to_linkify.sort(key=lambda x: x['start'])
+        p = current_node = markdown.util.etree.Element('p')
+
         def set_text(text):
             """
             Helper to set the text or the tail of the current_node
@@ -386,8 +397,6 @@ class InlineInterestingLinkProcessor(markdown.treeprocessors.Treeprocessor):
             else:
                 current_node.tail = text
 
-        to_linkify.sort(key=lambda x: x['start'])
-        p = current_node = markdown.util.etree.Element('p')
         current_index = 0
         for link in to_linkify:
             # The text we want to link starts in already linked text skip it
@@ -432,7 +441,7 @@ class InlineInterestingLinkProcessor(markdown.treeprocessors.Treeprocessor):
 
             ## TODO: unescape is an internal function, so we should
             ## use something else if we can find it
-            text = HTMLParser.HTMLParser().unescape(res['text'])
+            text = six.moves.html_parser.HTMLParser().unescape(res['text'])
             urls = res.get('urls', {})
             user_mentions = res.get('user_mentions', [])
             media = res.get('media', [])
@@ -450,7 +459,7 @@ class InlineInterestingLinkProcessor(markdown.treeprocessors.Treeprocessor):
 
                 # Find the image size that is smaller than
                 # TWITTER_MAX_IMAGE_HEIGHT px tall or the smallest
-                size_name_tuples = media_item['sizes'].items()
+                size_name_tuples = list(media_item['sizes'].items())
                 size_name_tuples.sort(reverse=True,
                                       key=lambda x: x[1]['h'])
                 for size_name, size in size_name_tuples:
@@ -553,7 +562,7 @@ class Emoji(markdown.inlinepatterns.Pattern):
         orig_syntax = match.group("syntax")
         name = orig_syntax[1:-1]
 
-        realm_emoji = {}
+        realm_emoji = {} # type: Dict[str, str]
         if db_data is not None:
             realm_emoji = db_data['emoji']
 
@@ -623,7 +632,7 @@ def sanitize_url(url):
     See the docstring on markdown.inlinepatterns.LinkPattern.sanitize_url.
     """
     try:
-        parts = urlparse.urlparse(url.replace(' ', '%20'))
+        parts = urllib.parse.urlparse(url.replace(' ', '%20'))
         scheme, netloc, path, params, query, fragment = parts
     except ValueError:
         # Bad url - so bad it couldn't be parsed.
@@ -635,10 +644,10 @@ def sanitize_url(url):
         scheme = 'mailto'
     elif scheme == '' and netloc == '' and len(path) > 0 and path[0] == '/':
         # Allow domain-relative links
-        return urlparse.urlunparse(('', '', path, params, query, fragment))
+        return urllib.parse.urlunparse(('', '', path, params, query, fragment))
     elif (scheme, netloc, path, params, query) == ('', '', '', '', '') and len(fragment) > 0:
         # Allow fragment links
-        return urlparse.urlunparse(('', '', '', '', '', fragment))
+        return urllib.parse.urlunparse(('', '', '', '', '', fragment))
 
     # Zulip modification: If scheme is not specified, assume http://
     # We re-enter sanitize_url because netloc etc. need to be re-parsed.
@@ -661,7 +670,7 @@ def sanitize_url(url):
     # Upstream code scans path, parameters, and query for colon characters
     # because
     #
-    #    some aliases [for javascript:] will appear to urlparse() to have
+    #    some aliases [for javascript:] will appear to urllib.parse to have
     #    no scheme. On top of that relative links (i.e.: "foo/bar.html")
     #    have no scheme.
     #
@@ -669,7 +678,7 @@ def sanitize_url(url):
     # the colon check, which would also forbid a lot of legitimate URLs.
 
     # Url passes all tests. Return url as-is.
-    return urlparse.urlunparse((scheme, netloc, path, params, query, fragment))
+    return urllib.parse.urlunparse((scheme, netloc, path, params, query, fragment))
 
 def url_to_a(url, text = None):
     a = markdown.util.etree.Element('a')
@@ -726,7 +735,7 @@ class BugdownUListPreprocessor(markdown.preprocessors.Preprocessor):
         inserts = 0
         fence = None
         copy = lines[:]
-        for i in xrange(len(lines) - 1):
+        for i in range(len(lines) - 1):
             # Ignore anything that is inside a fenced code block
             m = FENCE_RE.match(lines[i])
             if not fence and m:
@@ -829,7 +838,7 @@ class AlertWordsNotificationProcessor(markdown.preprocessors.Preprocessor):
             allowed_before_punctuation = "|".join([r'\s', '^', r'[\(\".,\';\[\*`>]'])
             allowed_after_punctuation = "|".join([r'\s', '$', r'[\)\"\?:.,\';\]!\*`]'])
 
-            for user_id, words in realm_words.iteritems():
+            for user_id, words in six.iteritems(realm_words):
                 for word in words:
                     escaped = re.escape(word.lower())
                     match_re = re.compile(r'(?:%s)%s(?:%s)' %
@@ -849,7 +858,7 @@ class AtomicLinkPattern(LinkPattern):
         ret = LinkPattern.handleMatch(self, m)
         if ret is None:
             return None
-        if not isinstance(ret, basestring):
+        if not isinstance(ret, six.string_types):
             ret.text = markdown.util.AtomicString(ret.text)
         return ret
 
@@ -984,7 +993,7 @@ def make_md_engine(key, opts):
 
 def subject_links(domain, subject):
     from zerver.models import get_realm, RealmFilter, realm_filters_for_domain
-    matches = []
+    matches = [] # type: List[str]
 
     try:
         realm_filters = realm_filters_for_domain(domain)
@@ -1015,7 +1024,7 @@ def maybe_update_realm_filters(domain):
     if domain is None:
         all_filters = all_realm_filters()
         all_filters['default'] = []
-        for domain, filters in all_filters.iteritems():
+        for domain, filters in six.iteritems(all_filters):
             make_realm_filters(domain, filters)
         # Hack to ensure that getConfig("realm") is right for mirrored Zephyrs
         make_realm_filters("mit.edu/zephyr_mirror", [])
@@ -1040,12 +1049,12 @@ def _sanitize_for_log(md):
 
 # Filters such as UserMentionPattern need a message, but python-markdown
 # provides no way to pass extra params through to a pattern. Thus, a global.
-current_message = None
+current_message = None # type: Any # Should be Message but bugdown doesn't import models.py.
 
 # We avoid doing DB queries in our markdown thread to avoid the overhead of
 # opening a new DB connection. These connections tend to live longer than the
 # threads themselves, as well.
-db_data = None
+db_data = None # type: Dict[str, Any]
 
 def do_convert(md, realm_domain=None, message=None):
     """Convert Markdown to HTML, with Zulip-specific settings and hacks."""
@@ -1099,8 +1108,8 @@ def do_convert(md, realm_domain=None, message=None):
         current_message = None
         db_data = None
 
-bugdown_time_start = 0
-bugdown_total_time = 0
+bugdown_time_start = 0.0
+bugdown_total_time = 0.0
 bugdown_total_requests = 0
 
 def get_bugdown_time():

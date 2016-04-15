@@ -1,4 +1,5 @@
 from __future__ import absolute_import
+from __future__ import print_function
 
 from optparse import make_option
 from django.core.management.base import BaseCommand
@@ -26,15 +27,15 @@ def compute_stats(log_level):
                            "bitcoin@mit.edu", "lp@mit.edu", "clocks@mit.edu",
                            "root@mit.edu", "nagios@mit.edu",
                            "www-data|local-realm@mit.edu"])
-    user_counts = {}
+    user_counts = {} # type: Dict[str, Dict[str, int]]
     for m in mit_query.select_related("sending_client", "sender"):
         email = m.sender.email
         user_counts.setdefault(email, {})
         user_counts[email].setdefault(m.sending_client.name, 0)
         user_counts[email][m.sending_client.name] += 1
 
-    total_counts = {}
-    total_user_counts = {}
+    total_counts = {} # type: Dict[str, int]
+    total_user_counts = {} # type: Dict[str, int]
     for email, counts in user_counts.items():
         total_user_counts.setdefault(email, 0)
         for client_name, count in counts.items():
@@ -43,9 +44,9 @@ def compute_stats(log_level):
             total_user_counts[email] += count
 
     logging.debug("%40s | %10s | %s" % ("User", "Messages", "Percentage Zulip"))
-    top_percents = {}
+    top_percents = {} # type: Dict[int, float]
     for size in [10, 25, 50, 100, 200, len(total_user_counts.keys())]:
-        top_percents[size] = 0
+        top_percents[size] = 0.0
     for i, email in enumerate(sorted(total_user_counts.keys(),
                                      key=lambda x: -total_user_counts[x])):
         percent_zulip = round(100 - (user_counts[email].get("zephyr_mirror", 0)) * 100. /
@@ -63,7 +64,7 @@ def compute_stats(log_level):
         logging.info("Top %6s | %s%%" % (size, round(top_percents[size], 1)))
 
     grand_total = sum(total_counts.values())
-    print grand_total
+    print(grand_total)
     logging.info("%15s | %s" % ("Client", "Percentage"))
     for client in total_counts.keys():
         logging.info("%15s | %s%%" % (client, round(100. * total_counts[client] / grand_total, 1)))

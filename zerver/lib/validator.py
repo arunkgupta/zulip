@@ -25,9 +25,11 @@ A simple example of composition is this:
 To extend this concept, it's simply a matter of writing your own validator
 for any particular type of object.
 '''
+from __future__ import absolute_import
+import six
 
 def check_string(var_name, val):
-    if not isinstance(val, basestring):
+    if not isinstance(val, six.string_types):
         return '%s is not a string' % (var_name,)
     return None
 
@@ -44,7 +46,7 @@ def check_bool(var_name, val):
 def check_none_or(sub_validator):
     def f(var_name, val):
         if val is None:
-            return
+            return None
         else:
             return sub_validator(var_name, val)
     return f

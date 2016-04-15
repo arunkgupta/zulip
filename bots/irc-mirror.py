@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#! /usr/bin/env python2.7
 #
 # EXPERIMENTAL
 # IRC <=> Zulip mirroring bot
@@ -6,6 +6,7 @@
 # Setup: First, you need to install python-irc version 8.5.3
 # (https://bitbucket.org/jaraco/irc)
 
+from __future__ import print_function
 import irc.bot
 import irc.strings
 from irc.client import ip_numstr_to_quad, ip_quad_to_numstr
@@ -53,12 +54,12 @@ class IRCBot(irc.bot.SingleServerIRCBot):
             return
 
         # Forward the PM to Zulip
-        print zulip_client.send_message({
+        print(zulip_client.send_message({
                 "sender": sender,
                 "type": "private",
                 "to": "username@example.com",
                 "content": content,
-                })
+                }))
 
     def on_pubmsg(self, c, e):
         content = e.arguments[0]
@@ -68,14 +69,14 @@ class IRCBot(irc.bot.SingleServerIRCBot):
             return
 
         # Forward the stream message to Zulip
-        print zulip_client.send_message({
+        print(zulip_client.send_message({
                 "forged": "yes",
                 "sender": sender,
                 "type": "stream",
                 "to": stream,
                 "subject": "IRC",
                 "content": content,
-                })
+                }))
 
     def on_dccmsg(self, c, e):
         c.privmsg("You said: " + e.arguments[0])
@@ -92,11 +93,11 @@ class IRCBot(irc.bot.SingleServerIRCBot):
                 return
             self.dcc_connect(address, port)
 
-usage = """python irc-mirror.py --server=IRC_SERVER --channel=<CHANNEL> --nick-prefix=<NICK> [optional args]
+usage = """python2.7 irc-mirror.py --server=IRC_SERVER --channel=<CHANNEL> --nick-prefix=<NICK> [optional args]
 
 Example:
 
-python irc-mirror.py --irc-server=127.0.0.1 --channel='#test' --nick-prefix=username
+python2.7 irc-mirror.py --irc-server=127.0.0.1 --channel='#test' --nick-prefix=username
   --site=https://zulip.example.com --user=irc-bot@example.com
   --api-key=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 

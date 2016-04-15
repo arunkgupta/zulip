@@ -10,7 +10,7 @@ from zerver.lib.response import json_error, json_unauthorized
 from django.utils.timezone import now
 from django.conf import settings
 import ujson
-from StringIO import StringIO
+from six.moves import cStringIO as StringIO
 from zerver.lib.queue import queue_json_publish
 from zerver.lib.timestamp import datetime_to_timestamp
 from zerver.lib.utils import statsd
@@ -23,13 +23,14 @@ import base64
 import logging
 import cProfile
 from zerver.lib.mandrill_client import get_mandrill_client
+from six.moves import zip
 
 if settings.ZULIP_COM:
     from zilencer.models import get_deployment_by_domain, Deployment
 else:
     from mock import Mock
     get_deployment_by_domain = Mock()
-    Deployment = Mock()
+    Deployment = Mock() # type: ignore # https://github.com/JukkaL/mypy/issues/1188
 
 def get_deployment_or_userprofile(role):
     return get_user_profile_by_email(role) if "@" in role else get_deployment_by_domain(role)
@@ -48,13 +49,13 @@ def asynchronous(method):
     def wrapper(request, *args, **kwargs):
         return method(request, handler=request._tornado_handler, *args, **kwargs)
     if getattr(method, 'csrf_exempt', False):
-        wrapper.csrf_exempt = True
+        wrapper.csrf_exempt = True # type: ignore # https://github.com/JukkaL/mypy/issues/1170
     return wrapper
 
 def update_user_activity(request, user_profile):
     # update_active_status also pushes to rabbitmq, and it seems
     # redundant to log that here as well.
-    if request.META["PATH_INFO"] == '/json/update_active_status':
+    if request.META["PATH_INFO"] == '/json/users/me/presence':
         return
 
     if hasattr(request, '_query'):
@@ -242,7 +243,7 @@ def authenticated_rest_api_view(view_func):
         try:
             # Could be a UserProfile or a Deployment
             profile = validate_api_key(role, api_key)
-        except JsonableError, e:
+        except JsonableError as e:
             return json_unauthorized(e.error)
         request.user = profile
         process_client(request, profile)
@@ -326,7 +327,7 @@ def internal_notify_view(view_func):
             # We got called through the non-Tornado server somehow.
             # This is not a security check; it's an internal assertion
             # to help us find bugs.
-            raise RuntimeError, 'notify view called with no Tornado handler'
+            raise RuntimeError('notify view called with no Tornado handler')
         request._email = "internal"
         return view_func(request, *args, **kwargs)
     return _wrapped_view_func
@@ -384,7 +385,7 @@ class REQ(object):
         """
 
         self.post_var_name = whence
-        self.func_var_name = None
+        self.func_var_name = None # type: str
         self.converter = converter
         self.validator = validator
         self.default = default
@@ -409,13 +410,13 @@ class REQ(object):
 # expected to call json_error or json_success, as it uses json_error
 # internally when it encounters an error
 def has_request_variables(view_func):
-    num_params = view_func.func_code.co_argcount
-    if view_func.func_defaults is None:
+    num_params = view_func.__code__.co_argcount
+    if view_func.__defaults__ is None:
         num_default_params = 0
     else:
-        num_default_params = len(view_func.func_defaults)
-    default_param_names = view_func.func_code.co_varnames[num_params - num_default_params:]
-    default_param_values = view_func.func_defaults
+        num_default_params = len(view_func.__defaults__)
+    default_param_names = view_func.__code__.co_varnames[num_params - num_default_params:]
+    default_param_values = view_func.__defaults__
     if default_param_values is None:
         default_param_values = []
 
@@ -572,13 +573,13 @@ def profiled(func):
     """
     This decorator should obviously be used only in a dev environment.
     It works best when surrounding a function that you expect to be
-    called once.  One strategy is to write a test case in zerver/tests.py
-    and wrap the test case with the profiled decorator.
+    called once.  One strategy is to write a backend test and wrap the
+    test case with the profiled decorator.
 
     You can run a single test case like this:
 
-        # edit zerver/tests.py and place @profiled above the test case below
-        ./tools/test-backend zerver.RateLimitTests.test_ratelimit_decrease
+        # edit zerver/tests/test_external.py and place @profiled above the test case below
+        ./tools/test-backend zerver.tests.test_external.RateLimitTests.test_ratelimit_decrease
 
     Then view the results like this:
 

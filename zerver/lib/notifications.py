@@ -1,3 +1,6 @@
+from __future__ import print_function
+from typing import Any, Tuple
+
 from confirmation.models import Confirmation
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
@@ -6,13 +9,13 @@ from zerver.decorator import statsd_increment, uses_mandrill
 from zerver.models import Recipient, ScheduledJob, UserMessage, \
     Stream, get_display_recipient, get_user_profile_by_email, \
     get_user_profile_by_id, receives_offline_notifications, \
-    get_context_for_message
+    get_context_for_message, Message
 
 import datetime
 import re
 import subprocess
 import ujson
-import urllib
+from six.moves import urllib
 from collections import defaultdict
 
 def unsubscribe_token(user_profile):
@@ -34,7 +37,7 @@ def hashchange_encode(string):
     # Do the same encoding operation as hashchange.encodeHashComponent on the
     # frontend.
     # `safe` has a default value of "/", but we want those encoded, too.
-    return urllib.quote(
+    return urllib.parse.quote(
         string.encode("utf-8"), safe="").replace(".", "%2E").replace("%", ".")
 
 def pm_narrow_url(participants):
@@ -57,7 +60,7 @@ def build_message_list(user_profile, messages):
     The messages are collapsed into per-recipient and per-sender blocks, like
     our web interface
     """
-    messages_to_render = []
+    messages_to_render = [] # type: List[Dict[str, Any]]
 
     def sender_string(message):
         sender = ''
@@ -220,7 +223,7 @@ def do_send_missedmessage_events_reply_in_zulip(user_profile, missed_messages, m
         'url': 'https://%s' % (settings.EXTERNAL_HOST,),
         'reply_warning': False,
         'external_host': settings.EXTERNAL_HOST,
-        'mention':missed_messages[0].recipient.type == Recipient.STREAM,
+        'mention': missed_messages[0].recipient.type == Recipient.STREAM,
         'reply_to_zulip': True,
     }
 
@@ -323,7 +326,7 @@ def handle_missedmessage_emails(user_profile_id, missed_email_events):
     if not messages:
         return
 
-    messages_by_recipient_subject = defaultdict(list)
+    messages_by_recipient_subject = defaultdict(list) # type: Dict[Tuple[int, str], List[Message]]
     for msg in messages:
         messages_by_recipient_subject[(msg.recipient_id, msg.subject)].append(msg)
 
@@ -343,7 +346,7 @@ def handle_missedmessage_emails(user_profile_id, missed_email_events):
             unique_messages = {m.id: m for m in msg_list}
             do_send_missedmessage_events_reply_in_zulip(
                 user_profile,
-                unique_messages.values(),
+                list(unique_messages.values()),
                 mesage_count_by_recipient_subject[recipient_subject],
             )
     else:
@@ -355,7 +358,7 @@ def handle_missedmessage_emails(user_profile_id, missed_email_events):
         unique_messages = {m.id: m for m in all_messages}
         do_send_missedmessage_events(
             user_profile,
-            unique_messages.values(),
+            list(unique_messages.values()),
             len(messages),
         )
 
@@ -381,7 +384,7 @@ def clear_followup_emails_queue(email, mail_client=None):
     for email in mail_client.messages.list_scheduled(to=email):
         result = mail_client.messages.cancel_scheduled(id=email["_id"])
         if result.get("status") == "error":
-            print result.get("name"), result.get("error")
+            print(result.get("name"), result.get("error"))
     return
 
 def log_digest_event(msg):
@@ -445,7 +448,7 @@ def send_future_email(recipients, email_html, email_text, subject,
                'tags': tags,
                }
     # ignore any delays smaller than 1-minute because it's cheaper just to sent them immediately
-    if type(delay) is not datetime.timedelta:
+    if not isinstance(delay, datetime.timedelta):
         raise TypeError("specified delay is of the wrong type: %s" % (type(delay),))
     if delay < datetime.timedelta(minutes=1):
         results = mail_client.messages.send(message=message, async=False, ip_pool="Main Pool")

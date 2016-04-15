@@ -1,4 +1,5 @@
 from __future__ import absolute_import
+from __future__ import print_function
 
 from django.conf import settings
 settings.RUNNING_INSIDE_TORNADO = True
@@ -20,10 +21,23 @@ from tornado import ioloop
 from zerver.lib.debug import interactive_debug_listen
 from zerver.lib.response import json_response
 from zerver.lib.event_queue import process_notification, missedmessage_hook
-from zerver.lib.event_queue import setup_event_queue, add_client_gc_hook
+from zerver.lib.event_queue import setup_event_queue, add_client_gc_hook, \
+    get_descriptor_by_handler_id, clear_handler_by_id
+from zerver.lib.handlers import allocate_handler_id
 from zerver.lib.queue import setup_tornado_rabbitmq
 from zerver.lib.socket import get_sockjs_router, respond_send_message
 from zerver.middleware import async_request_stop
+
+from threading import Lock
+from django.core.handlers import base
+from django.core.urlresolvers import set_script_prefix
+from django.core import signals
+from tornado.wsgi import WSGIContainer
+from django.core.handlers.wsgi import WSGIRequest, get_script_name
+from six.moves import urllib
+from django import http
+from django.core import exceptions, urlresolvers
+from django.conf import settings
 
 if settings.USING_RABBITMQ:
     from zerver.lib.queue import get_queue_client
@@ -58,7 +72,7 @@ class Command(BaseCommand):
             addr = '127.0.0.1'
 
         if not port.isdigit():
-            raise CommandError("%r is not a valid port number." % port)
+            raise CommandError("%r is not a valid port number." % (port,))
 
         xheaders = options.get('xheaders', True)
         no_keep_alive = options.get('no_keep_alive', False)
@@ -73,11 +87,11 @@ class Command(BaseCommand):
             from django.utils import translation
             translation.activate(settings.LANGUAGE_CODE)
 
-            print "Validating Django models.py..."
+            print("Validating Django models.py...")
             self.validate(display_num_errors=True)
-            print "\nDjango version %s" % (django.get_version())
-            print "Tornado server is running at http://%s:%s/" % (addr, port)
-            print "Quit the server with %s." % (quit_command,)
+            print("\nDjango version %s" % (django.get_version()))
+            print("Tornado server is running at http://%s:%s/" % (addr, port))
+            print("Quit the server with %s." % (quit_command,))
 
             if settings.USING_RABBITMQ:
                 queue_client = get_queue_client()
@@ -120,10 +134,6 @@ class Command(BaseCommand):
 #
 #  Modify the base Tornado handler for Django
 #
-from threading import Lock
-from django.core.handlers import base
-from django.core.urlresolvers import set_script_prefix
-from django.core import signals
 
 class AsyncDjangoHandler(tornado.web.RequestHandler, base.BaseHandler):
     initLock = Lock()
@@ -133,22 +143,23 @@ class AsyncDjangoHandler(tornado.web.RequestHandler, base.BaseHandler):
 
         # Set up middleware if needed. We couldn't do this earlier, because
         # settings weren't available.
-        self._request_middleware = None
+        self._request_middleware = None # type: ignore # Should be List[Callable[[WSGIRequest], Any]] https://github.com/JukkaL/mypy/issues/1174
         self.initLock.acquire()
         # Check that middleware is still uninitialised.
         if self._request_middleware is None:
             self.load_middleware()
         self.initLock.release()
         self._auto_finish = False
-        self.client_descriptor = None
+        # Handler IDs are allocated here, and the handler ID map must
+        # be cleared when the handler finishes its response
+        allocate_handler_id(self)
 
-    def get(self):
-        from tornado.wsgi import WSGIContainer
-        from django.core.handlers.wsgi import WSGIRequest, get_script_name
-        import urllib
+    def __repr__(self):
+        return "AsyncDjangoHandler<%s, %s>" % (self.handler_id, get_descriptor_by_handler_id(self.handler_id))
 
+    def get(self, *args, **kwargs):
         environ  = WSGIContainer.environ(self.request)
-        environ['PATH_INFO'] = urllib.unquote(environ['PATH_INFO'])
+        environ['PATH_INFO'] = urllib.parse.unquote(environ['PATH_INFO'])
         request  = WSGIRequest(environ)
         request._tornado_handler     = self
 
@@ -167,33 +178,30 @@ class AsyncDjangoHandler(tornado.web.RequestHandler, base.BaseHandler):
             self.set_header(h[0], h[1])
 
         if not hasattr(self, "_new_cookies"):
-            self._new_cookies = []
+            self._new_cookies = [] # type: List[http.cookie.SimpleCookie]
         self._new_cookies.append(response.cookies)
 
         self.write(response.content)
         self.finish()
 
 
-    def head(self):
-        self.get()
+    def head(self, *args, **kwargs):
+        self.get(*args, **kwargs)
 
-    def post(self):
-        self.get()
+    def post(self, *args, **kwargs):
+        self.get(*args, **kwargs)
 
-    def delete(self):
-        self.get()
+    def delete(self, *args, **kwargs):
+        self.get(*args, **kwargs)
 
     def on_connection_close(self):
-        if self.client_descriptor is not None:
-            self.client_descriptor.disconnect_handler(client_closed=True)
+        client_descriptor = get_descriptor_by_handler_id(self.handler_id)
+        if client_descriptor is not None:
+            client_descriptor.disconnect_handler(client_closed=True)
 
     # Based on django.core.handlers.base: get_response
     def get_response(self, request):
         "Returns an HttpResponse object for the given HttpRequest"
-        from django import http
-        from django.core import exceptions, urlresolvers
-        from django.conf import settings
-
         try:
             try:
                 # Setup default url resolver for this thread.
@@ -237,8 +245,10 @@ class AsyncDjangoHandler(tornado.web.RequestHandler, base.BaseHandler):
                         response = callback(request, *callback_args, **callback_kwargs)
                         if response is RespondAsynchronously:
                             async_request_stop(request)
-                            return
-                    except Exception, e:
+                            return None
+                        clear_handler_by_id(self.handler_id)
+                    except Exception as e:
+                        clear_handler_by_id(self.handler_id)
                         # If the view raised an exception, run it through exception
                         # middleware, and if the exception middleware returns a
                         # response, use that. Otherwise, reraise the exception.
@@ -251,7 +261,7 @@ class AsyncDjangoHandler(tornado.web.RequestHandler, base.BaseHandler):
 
                 if response is None:
                     try:
-                        view_name = callback.func_name
+                        view_name = callback.__name__
                     except AttributeError:
                         view_name = callback.__class__.__name__ + '.__call__'
                     raise ValueError("The view %s.%s returned None." %
@@ -265,7 +275,7 @@ class AsyncDjangoHandler(tornado.web.RequestHandler, base.BaseHandler):
                     response = response.render()
 
 
-            except http.Http404, e:
+            except http.Http404 as e:
                 if settings.DEBUG:
                     from django.views import debug
                     response = debug.technical_404_response(request, e)
@@ -298,7 +308,7 @@ class AsyncDjangoHandler(tornado.web.RequestHandler, base.BaseHandler):
             except SystemExit:
                 # See https://code.djangoproject.com/ticket/4701
                 raise
-            except Exception, e:
+            except Exception as e:
                 exc_info = sys.exc_info()
                 signals.got_request_exception.send(sender=self.__class__, request=request)
                 return self.handle_uncaught_exception(request, resolver, exc_info)

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import
+from __future__ import division
 
 import base64
 import hashlib
@@ -7,6 +8,7 @@ import os
 from time import sleep
 
 from django.conf import settings
+from six.moves import range
 
 def statsd_key(val, clean_periods=False):
     if not isinstance(val, str):
@@ -58,8 +60,8 @@ def run_in_batches(all_list, batch_size, callback, sleep_time = 0, logger = None
     if len(all_list) == 0:
         return
 
-    limit = (len(all_list) / batch_size) + 1;
-    for i in xrange(limit):
+    limit = (len(all_list) // batch_size) + 1;
+    for i in range(limit):
         start = i*batch_size
         end = (i+1) * batch_size
         if end >= len(all_list):
@@ -98,4 +100,4 @@ def log_statsd_event(name):
     statsd.incr(event_name)
 
 def generate_random_token(length):
-    return base64.b16encode(os.urandom(length / 2)).lower()
+    return base64.b16encode(os.urandom(length // 2)).lower()

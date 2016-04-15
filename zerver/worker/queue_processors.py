@@ -1,4 +1,5 @@
 from __future__ import absolute_import
+from typing import Any
 
 from django.conf import settings
 from django.core.handlers.wsgi import WSGIRequest
@@ -32,7 +33,10 @@ import time
 import datetime
 import logging
 import simplejson
-import StringIO
+from six.moves import cStringIO as StringIO
+
+class WorkerDeclarationException(Exception):
+    pass
 
 def assign_queue(queue_name, enabled=True):
     def decorate(clazz):
@@ -50,11 +54,18 @@ def get_worker(queue_name):
     return worker_classes[queue_name]()
 
 def get_active_worker_queues():
-    return worker_classes.iterkeys()
+    return list(worker_classes.keys())
 
 class QueueProcessingWorker(object):
+    queue_name = None # type: str
+
     def __init__(self):
-        self.q = SimpleQueueClient()
+        self.q = None # type: SimpleQueueClient
+        if self.queue_name is None:
+            raise WorkerDeclarationException("Queue worker declared without queue_name")
+
+    def consume(self, data):
+        raise WorkerDeclarationException("No consumer defined!")
 
     def consume_wrapper(self, data):
         try:
@@ -65,15 +76,18 @@ class QueueProcessingWorker(object):
                 os.mkdir(settings.QUEUE_ERROR_DIR)
             fname = '%s.errors' % (self.queue_name,)
             fn = os.path.join(settings.QUEUE_ERROR_DIR, fname)
-            line = '%s\t%s\n' % (time.asctime(), ujson.dumps(data))
+            line = u'%s\t%s\n' % (time.asctime(), ujson.dumps(data))
             lock_fn = fn + '.lock'
             with lockfile(lock_fn):
                 with open(fn, 'a') as f:
-                    f.write(line)
+                    f.write(line.encode('utf-8'))
         reset_queries()
 
     def _log_problem(self):
         logging.exception("Problem handling data on queue %s" % (self.queue_name,))
+
+    def setup(self):
+        self.q = SimpleQueueClient()
 
     def start(self):
         self.q.register_json_consumer(self.queue_name, self.consume_wrapper)
@@ -104,7 +118,7 @@ class SignupWorker(QueueProcessingWorker):
                         merge_vars=merge_vars,
                         double_optin=False,
                         send_welcome=False)
-            except MailChimpException, e:
+            except MailChimpException as e:
                 if e.code == 214:
                     logging.warning("Attempted to sign up already existing email to list: %s" % (data['EMAIL'],))
                 else:
@@ -165,7 +179,7 @@ class MissedMessageWorker(QueueProcessingWorker):
     def start(self):
         while True:
             missed_events = self.q.drain_queue("missedmessage_emails", json=True)
-            by_recipient = defaultdict(list)
+            by_recipient = defaultdict(list) # type: Dict[int, List[Dict[str, Any]]]
 
             for event in missed_events:
                 logging.info("Received event: %s" % (event,))
@@ -255,7 +269,7 @@ class SlowQueryWorker(QueueProcessingWorker):
             return
 
         if len(slow_queries) > 0:
-            topic = "%s: slow queries" % (settings.STATSD_PREFIX,)
+            topic = "%s: slow queries" % (settings.EXTERNAL_HOST,)
 
             content = ""
             for query in slow_queries:
@@ -278,12 +292,12 @@ class MessageSenderWorker(QueueProcessingWorker):
 
         environ = {'REQUEST_METHOD': 'SOCKET',
                    'SCRIPT_NAME': '',
-                   'PATH_INFO': '/json/send_message',
+                   'PATH_INFO': '/json/messages',
                    'SERVER_NAME': 'localhost',
                    'SERVER_PORT': 9993,
                    'SERVER_PROTOCOL': 'ZULIP_SOCKET/1.0',
                    'wsgi.version': (1, 0),
-                   'wsgi.input': StringIO.StringIO(),
+                   'wsgi.input': StringIO(),
                    'wsgi.errors': sys.stderr,
                    'wsgi.multithread': False,
                    'wsgi.multiprocess': True,

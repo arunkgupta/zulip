@@ -1,4 +1,5 @@
 from __future__ import absolute_import
+from typing import Any, Tuple
 
 from django.db import models
 from django.conf import settings
@@ -29,17 +30,17 @@ import re
 import ujson
 import logging
 
-bugdown = None
+bugdown = None # type: Any
 
 MAX_SUBJECT_LENGTH = 60
 MAX_MESSAGE_LENGTH = 10000
 
-# Doing 1000 memcached requests to get_display_recipient is quite slow,
-# so add a local cache as well as the memcached cache.
-per_request_display_recipient_cache = {}
+# Doing 1000 remote cache requests to get_display_recipient is quite slow,
+# so add a local cache as well as the remote cache cache.
+per_request_display_recipient_cache = {} # type: Dict[int, List[Dict[str, Any]]]
 def get_display_recipient_by_id(recipient_id, recipient_type, recipient_type_id):
     if recipient_id not in per_request_display_recipient_cache:
-        result = get_display_recipient_memcached(recipient_id, recipient_type, recipient_type_id)
+        result = get_display_recipient_remote_cache(recipient_id, recipient_type, recipient_type_id)
         per_request_display_recipient_cache[recipient_id] = result
     return per_request_display_recipient_cache[recipient_id]
 
@@ -58,7 +59,7 @@ def flush_per_request_caches():
 
 @cache_with_key(lambda *args: display_recipient_cache_key(args[0]),
                 timeout=3600*24*7)
-def get_display_recipient_memcached(recipient_id, recipient_type, recipient_type_id):
+def get_display_recipient_remote_cache(recipient_id, recipient_type, recipient_type_id):
     """
     returns: an appropriate object describing the recipient.  For a
     stream this will be the stream name as a string.  For a huddle or
@@ -124,7 +125,7 @@ class Realm(models.Model):
     notifications_stream = models.ForeignKey('Stream', related_name='+', null=True, blank=True)
     deactivated = models.BooleanField(default=False)
 
-    NOTIFICATION_STREAM_NAME = 'zulip'
+    DEFAULT_NOTIFICATION_STREAM_NAME = 'zulip'
 
     def __repr__(self):
         return (u"<Realm: %s %s>" % (self.domain, self.id)).encode("utf-8")
@@ -142,9 +143,10 @@ class Realm(models.Model):
         except IndexError:
             return None
 
-    @deployment.setter
+    @deployment.setter # type: ignore # https://github.com/python/mypy/issues/220
     def set_deployments(self, value):
-        self._deployments = [value]
+        # type: (Any) -> None
+        self._deployments = [value] # type: Any
 
     def get_admin_users(self):
         # This method is kind of expensive, due to our complex permissions model.
@@ -154,7 +156,7 @@ class Realm(models.Model):
     def get_active_users(self):
         return UserProfile.objects.filter(realm=self, is_active=True).select_related()
 
-    class Meta:
+    class Meta(object):
         permissions = (
             ('administer', "Administer a realm"),
             ('api_super_user', "Can send messages as other users for mirroring"),
@@ -188,6 +190,19 @@ def resolve_email_to_domain(email):
         domain = alias.realm.domain
     return domain
 
+# Is a user with the given email address allowed to be in the given realm?
+# (This function does not check whether the user has been invited to the realm.
+# So for invite-only realms, this is the test for whether a user can be invited,
+# not whether the user can sign up currently.)
+def email_allowed_for_realm(email, realm):
+    # Anyone can be in an open realm
+    if not realm.restricted_to_domain:
+        return True
+
+    # Otherwise, domains must match (case-insensitively)
+    email_domain = resolve_email_to_domain(email)
+    return email_domain == realm.domain.lower()
+
 def alias_for_realm(domain):
     try:
         return RealmAlias.objects.get(domain=domain)
@@ -204,7 +219,7 @@ class RealmEmoji(models.Model):
     name = models.TextField()
     img_url = models.TextField()
 
-    class Meta:
+    class Meta(object):
         unique_together = ("realm", "name")
 
     def __str__(self):
@@ -230,7 +245,7 @@ class RealmFilter(models.Model):
     pattern = models.TextField()
     url_format_string = models.TextField()
 
-    class Meta:
+    class Meta(object):
         unique_together = ("realm", "pattern")
 
     def __str__(self):
@@ -239,16 +254,16 @@ class RealmFilter(models.Model):
 def get_realm_filters_cache_key(domain):
     return 'all_realm_filters:%s' % (domain,)
 
-# We have a per-process cache to avoid doing 1000 memcached queries during page load
-per_request_realm_filters_cache = {}
+# We have a per-process cache to avoid doing 1000 remote cache queries during page load
+per_request_realm_filters_cache = {} # type: Dict[str, List[RealmFilter]]
 def realm_filters_for_domain(domain):
     domain = domain.lower()
     if domain not in per_request_realm_filters_cache:
-        per_request_realm_filters_cache[domain] = realm_filters_for_domain_memcached(domain)
+        per_request_realm_filters_cache[domain] = realm_filters_for_domain_remote_cache(domain)
     return per_request_realm_filters_cache[domain]
 
 @cache_with_key(get_realm_filters_cache_key, timeout=3600*24*7)
-def realm_filters_for_domain_memcached(domain):
+def realm_filters_for_domain_remote_cache(domain):
     filters = []
     for realm_filter in RealmFilter.objects.filter(realm=get_realm(domain)):
        filters.append((realm_filter.pattern, realm_filter.url_format_string))
@@ -256,7 +271,8 @@ def realm_filters_for_domain_memcached(domain):
     return filters
 
 def all_realm_filters():
-    filters = defaultdict(list)
+    # type: () -> Dict[str, List[Tuple[str, str]]]
+    filters = defaultdict(list) # type: Dict[str, List[Tuple[str, str]]]
     for realm_filter in RealmFilter.objects.all():
        filters[realm_filter.realm.domain].append((realm_filter.pattern, realm_filter.url_format_string))
 
@@ -278,8 +294,8 @@ class UserProfile(AbstractBaseUser, PermissionsMixin):
     # which we don't use; email is modified to make it indexed and unique.
     email = models.EmailField(blank=False, db_index=True, unique=True)
     is_staff = models.BooleanField(default=False)
-    is_active = models.BooleanField(default=True)
-    is_bot = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True, db_index=True)
+    is_bot = models.BooleanField(default=False, db_index=True)
     date_joined = models.DateTimeField(default=timezone.now)
     is_mirror_dummy = models.BooleanField(default=False)
     bot_owner = models.ForeignKey('self', null=True, on_delete=models.SET_NULL)
@@ -371,7 +387,7 @@ class UserProfile(AbstractBaseUser, PermissionsMixin):
     # [["social", "mit"], ["devel", "ios"]]
     muted_topics = models.TextField(default=ujson.dumps([]))
 
-    objects = UserManager()
+    objects = UserManager() # type: UserManager
 
     def can_admin_user(self, target_user):
         """Returns whether this user has permission to modify target_user"""
@@ -419,7 +435,7 @@ def receives_offline_notifications(user_profile):
              user_profile.enable_offline_push_notifications) and
             not user_profile.is_bot)
 
-# Make sure we flush the UserProfile object from our memcached
+# Make sure we flush the UserProfile object from our remote cache
 # whenever we save it.
 post_save.connect(flush_user_profile, sender=UserProfile)
 
@@ -504,7 +520,7 @@ class Stream(models.Model):
         # All streams are private at MIT.
         return self.realm.domain != "mit.edu" and not self.invite_only
 
-    class Meta:
+    class Meta(object):
         unique_together = ("name", "realm")
 
     @classmethod
@@ -537,6 +553,13 @@ post_delete.connect(flush_stream, sender=Stream)
 def valid_stream_name(name):
     return name != ""
 
+# The Recipient table is used to map Messages to the set of users who
+# received the message.  It is implemented as a set of triples (id,
+# type_id, type). We have 3 types of recipients: Huddles (for group
+# private messages), UserProfiles (for 1:1 private messages), and
+# Ttreams. The recipient table maps a globally unique recipient id
+# (used by the Message table) to the type-specific unique id (the
+# stream id, user_profile id, or huddle id).
 class Recipient(models.Model):
     type_id = models.IntegerField(db_index=True)
     type = models.PositiveSmallIntegerField(db_index=True)
@@ -545,7 +568,7 @@ class Recipient(models.Model):
     STREAM = 2
     HUDDLE = 3
 
-    class Meta:
+    class Meta(object):
         unique_together = ("type", "type_id")
 
     # N.B. If we used Django's choice=... we would get this for free (kinda)
@@ -565,10 +588,10 @@ class Recipient(models.Model):
 class Client(models.Model):
     name = models.CharField(max_length=30, db_index=True, unique=True)
 
-get_client_cache = {}
+get_client_cache = {} # type: Dict[str, Client]
 def get_client(name):
     if name not in get_client_cache:
-        result = get_client_memcached(name)
+        result = get_client_remote_cache(name)
         get_client_cache[name] = result
     return get_client_cache[name]
 
@@ -576,7 +599,7 @@ def get_client_cache_key(name):
     return 'get_client:%s' % (make_safe_digest(name),)
 
 @cache_with_key(get_client_cache_key, timeout=3600*24*7)
-def get_client_memcached(name):
+def get_client_remote_cache(name):
     (client, _) = Client.objects.get_or_create(name=name)
     return client
 
@@ -651,10 +674,10 @@ def linebreak(string):
     return string.replace('\n\n', '<p/>').replace('\n', '<br/>')
 
 def extract_message_dict(message_str):
-    return ujson.loads(zlib.decompress(message_str))
+    return ujson.loads(zlib.decompress(message_str).decode("utf-8"))
 
 def stringify_message_dict(message_dict):
-    return zlib.compress(ujson.dumps(message_dict))
+    return zlib.compress(ujson.dumps(message_dict).encode("utf-8"))
 
 def to_dict_cache_key_id(message_id, apply_markdown):
     return 'message_dict:%d:%d' % (message_id, apply_markdown)
@@ -699,8 +722,8 @@ class Message(models.Model):
 
         self.mentions_wildcard = False
         self.is_me_message = False
-        self.mentions_user_ids = set()
-        self.user_ids_with_alert_words = set()
+        self.mentions_user_ids = set() # type: Set[int]
+        self.user_ids_with_alert_words = set() # type: Set[int]
 
         if not domain:
             domain = self.sender.realm.domain
@@ -751,7 +774,7 @@ class Message(models.Model):
 
     @staticmethod
     def need_to_render_content(rendered_content, rendered_content_version):
-        return rendered_content_version < bugdown.version or rendered_content is None
+        return rendered_content is None or rendered_content_version < bugdown.version
 
     def to_dict(self, apply_markdown):
         return extract_message_dict(self.to_dict_json(apply_markdown))
@@ -1010,6 +1033,19 @@ def get_context_for_message(message):
     ).order_by('-id')[:10]
 
 
+# Whenever a message is sent, for each user current subscribed to the
+# corresponding Recipient object, we add a row to the UserMessage
+# table, which has has columns (id, user profile id, message id,
+# flags) indicating which messages each user has received.  This table
+# allows us to quickly query any user's last 1000 messages to generate
+# the home view.
+#
+# Additionally, the flags field stores metadata like whether the user
+# has read the message, starred the message, collapsed or was
+# mentioned the message, etc.
+#
+# UserMessage is the largest table in a Zulip installation, even
+# though each row is only 4 integers.
 class UserMessage(models.Model):
     user_profile = models.ForeignKey(UserProfile)
     message = models.ForeignKey(Message)
@@ -1021,7 +1057,7 @@ class UserMessage(models.Model):
                  'has_alert_word', "historical", 'is_me_message']
     flags = BitField(flags=ALL_FLAGS, default=0)
 
-    class Meta:
+    class Meta(object):
         unique_together = ("user_profile", "message")
 
     def __repr__(self):
@@ -1056,7 +1092,7 @@ class Subscription(models.Model):
     # above.
     notifications = models.BooleanField(default=False)
 
-    class Meta:
+    class Meta(object):
         unique_together = ("user_profile", "recipient")
 
     def __repr__(self):
@@ -1091,6 +1127,12 @@ def get_prereg_user_by_email(email):
     # invite.
     return PreregistrationUser.objects.filter(email__iexact=email.strip()).latest("invited_at")
 
+# The Huddle class represents a group of individuals who have had a
+# Group Private Message conversation together.  The actual membership
+# of the Huddle is stored in the Subscription table just like with
+# Streams, and a hash of that list is stored in the huddle_hash field
+# below, to support efficiently mapping from a set of users to the
+# corresponding Huddle object.
 class Huddle(models.Model):
     # TODO: We should consider whether using
     # CommaSeparatedIntegerField would be better.
@@ -1131,6 +1173,7 @@ def get_realm(domain):
 
 def clear_database():
     pylibmc.Client(['127.0.0.1']).flush_all()
+    model = None # type: Any
     for model in [Message, Stream, UserProfile, Recipient,
                   Realm, Subscription, Huddle, UserMessage, Client,
                   DefaultStream]:
@@ -1145,7 +1188,7 @@ class UserActivity(models.Model):
     count = models.IntegerField()
     last_visit = models.DateTimeField('last visit')
 
-    class Meta:
+    class Meta(object):
         unique_together = ("user_profile", "client", "query")
 
 class UserActivityInterval(models.Model):
@@ -1173,7 +1216,8 @@ class UserPresence(models.Model):
 
     @staticmethod
     def get_status_dict_by_realm(realm_id):
-        user_statuses = defaultdict(dict)
+        # type: (Any) -> Any
+        user_statuses = defaultdict(dict) # type: Dict[Any, Dict[Any, Any]]
 
         query = UserPresence.objects.filter(
                 user_profile__realm_id=realm_id,
@@ -1239,28 +1283,15 @@ class UserPresence(models.Model):
 
         return status_val
 
-    class Meta:
+    class Meta(object):
         unique_together = ("user_profile", "client")
 
 class DefaultStream(models.Model):
     realm = models.ForeignKey(Realm)
     stream = models.ForeignKey(Stream)
 
-    class Meta:
+    class Meta(object):
         unique_together = ("realm", "stream")
-
-# FIXME: The foreign key relationship here is backwards.
-#
-# We can't easily get a list of streams and their associated colors (if any) in
-# a single query.  See zerver.views.gather_subscriptions for an example.
-#
-# We should change things around so that is possible.  Probably this should
-# just be a column on Subscription.
-class StreamColor(models.Model):
-    DEFAULT_STREAM_COLOR = "#c2c2c2"
-
-    subscription = models.ForeignKey(Subscription)
-    color = models.CharField(max_length=10)
 
 class Referral(models.Model):
     user_profile = models.ForeignKey(UserProfile)

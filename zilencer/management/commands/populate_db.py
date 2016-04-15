@@ -1,4 +1,6 @@
 from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 from django.core.management.base import BaseCommand
 from django.utils.timezone import now
@@ -27,6 +29,8 @@ import random
 import glob
 import os
 from optparse import make_option
+from six.moves import range
+from typing import Any, Dict, Set, Tuple
 
 settings.TORNADO_SERVER = None
 
@@ -125,7 +129,7 @@ class Command(BaseCommand):
             names = [("Othello, the Moor of Venice", "othello@zulip.com"), ("Iago", "iago@zulip.com"),
                      ("Prospero from The Tempest", "prospero@zulip.com"),
                      ("Cordelia Lear", "cordelia@zulip.com"), ("King Hamlet", "hamlet@zulip.com")]
-            for i in xrange(options["extra_users"]):
+            for i in range(options["extra_users"]):
                 names.append(('Extra User %d' % (i,), 'extrauser%d@zulip.com' % (i,)))
             create_users(realms, names)
             iago = UserProfile.objects.get(email="iago@zulip.com")
@@ -135,9 +139,12 @@ class Command(BaseCommand):
             create_streams(realms, zulip_realm, stream_list)
             recipient_streams = [Stream.objects.get(name=name, realm=zulip_realm).id for name in stream_list]
 
-            # Create subscriptions to streams
+            # Create subscriptions to streams.  The following
+            # algorithm will give each of the users a different but
+            # deterministic subset of the streams (given a fixed list
+            # of users).
             subscriptions_to_add = []
-            profiles = UserProfile.objects.select_related().all()
+            profiles = UserProfile.objects.select_related().all().order_by("email")
             for i, profile in enumerate(profiles):
                 # Subscribe to some streams.
                 for type_id in recipient_streams[:int(len(recipient_streams) *
@@ -155,17 +162,17 @@ class Command(BaseCommand):
         user_profiles = [user_profile.id for user_profile in UserProfile.objects.all()]
 
         # Create several initial huddles
-        for i in xrange(options["num_huddles"]):
+        for i in range(options["num_huddles"]):
             get_huddle(random.sample(user_profiles, random.randint(3, 4)))
 
         # Create several initial pairs for personals
         personals_pairs = [random.sample(user_profiles, 2)
-                           for i in xrange(options["num_personals"])]
+                           for i in range(options["num_personals"])]
 
         threads = options["threads"]
         jobs = []
-        for i in xrange(threads):
-            count = options["num_messages"] / threads
+        for i in range(threads):
+            count = options["num_messages"] // threads
             if i < options["num_messages"] % threads:
                 count += 1
             jobs.append((count, personals_pairs, options, self.stdout.write))
@@ -242,7 +249,7 @@ class Command(BaseCommand):
         if options["replay_old_messages"]:
             restore_saved_messages()
 
-recipient_hash = {}
+recipient_hash = {} # type: Dict[int, Recipient]
 def get_recipient_by_id(rid):
     if rid in recipient_hash:
         return recipient_hash[rid]
@@ -250,9 +257,9 @@ def get_recipient_by_id(rid):
 
 def restore_saved_messages():
     old_messages = []
-    duplicate_suppression_hash = {}
+    duplicate_suppression_hash = {} # type: Dict[str, bool]
 
-    stream_dict = {}
+    stream_dict = {} # type: Dict[Tuple[str, str], Tuple[str, str]]
     user_set = set()
     email_set = set([u.email for u in UserProfile.objects.all()])
     realm_set = set()
@@ -261,7 +268,7 @@ def restore_saved_messages():
     client_set = set(["populate_db", "website", "zephyr_mirror"])
     huddle_user_set = set()
     # First, determine all the objects our messages will need.
-    print datetime.datetime.now(), "Creating realms/streams/etc..."
+    print(datetime.datetime.now(), "Creating realms/streams/etc...")
     def process_line(line):
         old_message_json = line.strip()
 
@@ -312,7 +319,7 @@ def restore_saved_messages():
         if message_type == 'personal':
             old_message["recipient"][0]["email"] = fix_email(old_message["recipient"][0]["email"])
         elif message_type == "huddle":
-            for i in xrange(len(old_message["recipient"])):
+            for i in range(len(old_message["recipient"])):
                 old_message["recipient"][i]["email"] = fix_email(old_message["recipient"][i]["email"])
 
         old_messages.append(old_message)
@@ -367,7 +374,7 @@ def restore_saved_messages():
 
     event_glob = os.path.join(settings.EVENT_LOG_DIR, 'events.*')
     for filename in sorted(glob.glob(event_glob)):
-        with file(filename, "r") as message_log:
+        with open(filename, "r") as message_log:
             for line in message_log.readlines():
                 process_line(line)
 
@@ -376,22 +383,22 @@ def restore_saved_messages():
     huddle_recipients = {}
 
     # Then, create the objects our messages need.
-    print datetime.datetime.now(), "Creating realms..."
+    print(datetime.datetime.now(), "Creating realms...")
     bulk_create_realms(realm_set)
 
     realms = {}
     for realm in Realm.objects.all():
         realms[realm.domain] = realm
 
-    print datetime.datetime.now(), "Creating clients..."
+    print(datetime.datetime.now(), "Creating clients...")
     bulk_create_clients(client_set)
 
     clients = {}
     for client in Client.objects.all():
         clients[client.name] = client
 
-    print datetime.datetime.now(), "Creating streams..."
-    bulk_create_streams(realms, stream_dict.values())
+    print(datetime.datetime.now(), "Creating streams...")
+    bulk_create_streams(realms, list(stream_dict.values()))
 
     streams = {}
     for stream in Stream.objects.all():
@@ -400,7 +407,7 @@ def restore_saved_messages():
         stream_recipients[(streams[recipient.type_id].realm_id,
                            streams[recipient.type_id].name.lower())] = recipient
 
-    print datetime.datetime.now(), "Creating users..."
+    print(datetime.datetime.now(), "Creating users...")
     bulk_create_users(realms, user_set)
 
     users = {}
@@ -411,7 +418,7 @@ def restore_saved_messages():
     for recipient in Recipient.objects.filter(type=Recipient.PERSONAL):
         user_recipients[users_by_id[recipient.type_id].email] = recipient
 
-    print datetime.datetime.now(), "Creating huddles..."
+    print(datetime.datetime.now(), "Creating huddles...")
     bulk_create_huddles(users, huddle_user_set)
 
     huddles_by_id = {}
@@ -423,14 +430,14 @@ def restore_saved_messages():
     # TODO: Add a special entry type in the log that is a subscription
     # change and import those as we go to make subscription changes
     # take effect!
-    print datetime.datetime.now(), "Importing subscriptions..."
-    subscribers = {}
+    print(datetime.datetime.now(), "Importing subscriptions...")
+    subscribers = {} # type: Dict[int, Set[int]]
     for s in Subscription.objects.select_related().all():
         if s.active:
             subscribers.setdefault(s.recipient.id, set()).add(s.user_profile.id)
 
     # Then create all the messages, without talking to the DB!
-    print datetime.datetime.now(), "Importing messages, part 1..."
+    print(datetime.datetime.now(), "Importing messages, part 1...")
     first_message_id = None
     if Message.objects.exists():
         first_message_id = Message.objects.all().order_by("-id")[0].id + 1
@@ -482,12 +489,12 @@ def restore_saved_messages():
             raise ValueError('Bad message type')
         messages_to_create.append(message)
 
-    print datetime.datetime.now(), "Importing messages, part 2..."
+    print(datetime.datetime.now(), "Importing messages, part 2...")
     Message.objects.bulk_create(messages_to_create)
     messages_to_create = []
 
     # Finally, create all the UserMessage objects
-    print datetime.datetime.now(), "Importing usermessages, part 1..."
+    print(datetime.datetime.now(), "Importing usermessages, part 1...")
     personal_recipients = {}
     for r in Recipient.objects.filter(type = Recipient.PERSONAL):
         personal_recipients[r.id] = True
@@ -500,7 +507,7 @@ def restore_saved_messages():
         messages_by_id[message.id] = message
 
     if len(messages_by_id) == 0:
-        print datetime.datetime.now(), "No old messages to replay"
+        print(datetime.datetime.now(), "No old messages to replay")
         return
 
     if first_message_id is None:
@@ -526,8 +533,8 @@ def restore_saved_messages():
             try:
                 subscribers[stream_recipients[stream_key].id].remove(user_id)
             except KeyError:
-                print "Error unsubscribing %s from %s: not subscribed" % (
-                    old_message["user"], old_message["name"])
+                print("Error unsubscribing %s from %s: not subscribed" % (
+                    old_message["user"], old_message["name"]))
             pending_subs[(stream_recipients[stream_key].id,
                           users[old_message["user"]].id)] = False
             continue
@@ -627,11 +634,11 @@ def restore_saved_messages():
             UserMessage.objects.bulk_create(user_messages_to_create)
             user_messages_to_create = []
 
-    print datetime.datetime.now(), "Importing usermessages, part 2..."
+    print(datetime.datetime.now(), "Importing usermessages, part 2...")
     tot_user_messages += len(user_messages_to_create)
     UserMessage.objects.bulk_create(user_messages_to_create)
 
-    print datetime.datetime.now(), "Finalizing subscriptions..."
+    print(datetime.datetime.now(), "Finalizing subscriptions...")
     current_subs = {}
     current_subs_obj = {}
     for s in Subscription.objects.select_related().all():
@@ -655,25 +662,25 @@ def restore_saved_messages():
                          active=pending_subs[pending_sub])
         subscriptions_to_add.append(s)
     Subscription.objects.bulk_create(subscriptions_to_add)
-    for (sub, active) in subscriptions_to_change:
-        current_subs_obj[sub].active = active
-        current_subs_obj[sub].save(update_fields=["active"])
+    for (sub_tuple, active) in subscriptions_to_change:
+        current_subs_obj[sub_tuple].active = active
+        current_subs_obj[sub_tuple].save(update_fields=["active"])
 
-    subs = {}
+    subs = {} # type: Dict[Tuple[int, int], Subscription]
     for sub in Subscription.objects.all():
         subs[(sub.user_profile_id, sub.recipient_id)] = sub
 
     # TODO: do restore of subscription colors -- we're currently not
     # logging changes so there's little point in having the code :(
 
-    print datetime.datetime.now(), "Finished importing %s messages (%s usermessages)" % \
-        (len(all_messages), tot_user_messages)
+    print(datetime.datetime.now(), "Finished importing %s messages (%s usermessages)" % \
+        (len(all_messages), tot_user_messages))
 
     site = Site.objects.get_current()
     site.domain = 'zulip.com'
     site.save()
 
-    print datetime.datetime.now(), "Filling in user pointers..."
+    print(datetime.datetime.now(), "Filling in user pointers...")
 
     # Set restored pointers to the very latest messages
     for user_profile in UserProfile.objects.all():
@@ -685,7 +692,7 @@ def restore_saved_messages():
             user_profile.pointer = -1
         user_profile.save(update_fields=["pointer"])
 
-    print datetime.datetime.now(), "Done replaying old messages"
+    print(datetime.datetime.now(), "Done replaying old messages")
 
 # Create some test messages, including:
 # - multiple streams
@@ -697,7 +704,7 @@ def restore_saved_messages():
 def send_messages(data):
     (tot_messages, personals_pairs, options, output) = data
     random.seed(os.getpid())
-    texts = file("zilencer/management/commands/test_messages.txt", "r").readlines()
+    texts = open("zilencer/management/commands/test_messages.txt", "r").readlines()
     offset = random.randint(0, len(texts))
 
     recipient_streams = [klass.id for klass in
@@ -711,9 +718,9 @@ def send_messages(data):
 
     num_messages = 0
     random_max = 1000000
-    recipients = {}
+    recipients = {} # type: Dict[int, Tuple[int, int, Dict[str, Any]]]
     while num_messages < tot_messages:
-        saved_data = ''
+        saved_data = {} # type: Dict[str, Any]
         message = Message()
         message.sending_client = get_client('populate_db')
         length = random.randint(1, 5)
@@ -728,10 +735,10 @@ def send_messages(data):
             # Use an old recipient
             message_type, recipient_id, saved_data = recipients[num_messages - 1]
             if message_type == Recipient.PERSONAL:
-                personals_pair = saved_data
+                personals_pair = saved_data['personals_pair']
                 random.shuffle(personals_pair)
             elif message_type == Recipient.STREAM:
-                message.subject = saved_data
+                message.subject = saved_data['subject']
                 message.recipient = get_recipient_by_id(recipient_id)
             elif message_type == Recipient.HUDDLE:
                 message.recipient = get_recipient_by_id(recipient_id)
@@ -753,18 +760,18 @@ def send_messages(data):
             message.recipient = Recipient.objects.get(type=Recipient.PERSONAL,
                                                          type_id=personals_pair[0])
             message.sender = get_user_profile_by_id(personals_pair[1])
-            saved_data = personals_pair
+            saved_data['personals_pair'] = personals_pair
         elif message_type == Recipient.STREAM:
             stream = Stream.objects.get(id=message.recipient.type_id)
             # Pick a random subscriber to the stream
             message.sender = random.choice(Subscription.objects.filter(
                     recipient=message.recipient)).user_profile
             message.subject = stream.name + str(random.randint(1, 3))
-            saved_data = message.subject
+            saved_data['subject'] = message.subject
 
         message.pub_date = now()
         do_send_message(message)
 
-        recipients[num_messages] = [message_type, message.recipient.id, saved_data]
+        recipients[num_messages] = (message_type, message.recipient.id, saved_data)
         num_messages += 1
     return tot_messages

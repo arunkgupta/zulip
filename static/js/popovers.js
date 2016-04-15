@@ -157,12 +157,21 @@ exports.hide_streamlist_sidebar = function () {
     $(".app-main .column-left").removeClass("expanded");
 };
 
+exports.hide_pm_list_sidebar = function () {
+    $(".app-main .column-left").removeClass("expanded");
+};
+
 exports.show_userlist_sidebar = function () {
     $(".app-main .column-right").addClass("expanded");
     resize.resize_page_components();
 };
 
 exports.show_streamlist_sidebar = function () {
+    $(".app-main .column-left").addClass("expanded");
+    resize.resize_page_components();
+};
+
+exports.show_pm_list_sidebar = function () {
     $(".app-main .column-left").addClass("expanded");
     resize.resize_page_components();
 };
@@ -471,31 +480,19 @@ exports.register_click_handlers = function () {
         e.preventDefault();
     });
     $('body').on('click', '.popover_toggle_collapse', function (e) {
-        var home_row;
         var msgid = $(e.currentTarget).data('msgid');
         var row = current_msg_list.get_row(msgid);
         var message = current_msg_list.get(rows.id(row));
 
-        // If we are narrowed we also need to collapse this message in the home
-        // view.
-        if (current_msg_list === narrowed_msg_list) {
-            home_row = home_msg_list.get_row(msgid);
-        }
+        popovers.hide_actions_popover();
 
-        var toggle_row = function toggle_row(row) {
-            if (!row) { return; }
-
+        if (row) {
             if (message.collapsed) {
                 condense.uncollapse(row);
             } else {
                 condense.collapse(row);
             }
-        };
-
-        popovers.hide_actions_popover();
-
-        toggle_row(row);
-        toggle_row(home_row);
+        }
 
         e.stopPropagation();
         e.preventDefault();

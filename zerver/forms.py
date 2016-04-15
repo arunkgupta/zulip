@@ -7,21 +7,24 @@ from django.contrib.auth.forms import SetPasswordForm, AuthenticationForm
 from django.conf import settings
 
 from zerver.models import Realm, get_user_profile_by_email, UserProfile, \
-    completely_open, resolve_email_to_domain, get_realm
+    completely_open, resolve_email_to_domain, get_realm, get_unique_open_realm
 from zerver.lib.actions import do_change_password, is_inactive
 from zproject.backends import password_auth_enabled
 import DNS
 
-SIGNUP_STRING = u'Use a different e-mail address, or contact %s with questions.'%(settings.ZULIP_ADMINISTRATOR,)
+SIGNUP_STRING = u'Your e-mail does not match any existing open organization. ' + \
+                u'Use a different e-mail address, or contact %s with questions.' % (settings.ZULIP_ADMINISTRATOR,)
+if settings.ZULIP_COM:
+    SIGNUP_STRING = u'Your e-mail does not match any existing organization. <br />' + \
+                    u"The zulip.com service is not taking new customer teams. <br /> " + \
+                    u"<a href=\"https://blogs.dropbox.com/tech/2015/09/open-sourcing-zulip-a-dropbox-hack-week-project/\">Zulip is open source</a>, so you can install your own Zulip server " + \
+                    u"by following the instructions on <a href=\"https://www.zulip.org\">www.zulip.org</a>!"
 
 def has_valid_realm(value):
     # Checks if there is a realm without invite_required
     # matching the domain of the input e-mail.
-    try:
-        realm = get_realm(resolve_email_to_domain(value))
-    except Realm.DoesNotExist:
-        return False
-    return not realm.invite_required
+    realm = get_realm(resolve_email_to_domain(value))
+    return realm is not None and not realm.invite_required
 
 def not_mit_mailing_list(value):
     # I don't want ec-discuss signed up for Zulip
@@ -31,7 +34,7 @@ def not_mit_mailing_list(value):
         try:
             DNS.dnslookup("%s.pobox.ns.athena.mit.edu" % username, DNS.Type.TXT)
             return True
-        except DNS.Base.ServerError, e:
+        except DNS.Base.ServerError as e:
             if e.rcode == DNS.Status.NXDOMAIN:
                 raise ValidationError(mark_safe(u'That user does not exist at MIT or is a <a href="https://ist.mit.edu/email-lists">mailing list</a>. If you want to sign up an alias for Zulip, <a href="mailto:support@zulip.com">contact us</a>.'))
             else:
@@ -60,17 +63,17 @@ class HomepageForm(forms.Form):
 
     def __init__(self, *args, **kwargs):
         self.domain = kwargs.get("domain")
-        if kwargs.has_key("domain"):
+        if "domain" in kwargs:
             del kwargs["domain"]
         super(HomepageForm, self).__init__(*args, **kwargs)
 
     def clean_email(self):
         data = self.cleaned_data['email']
-        if completely_open(self.domain) or has_valid_realm(data) and not_mit_mailing_list(data):
+        if (get_unique_open_realm() or
+            completely_open(self.domain) or
+            (has_valid_realm(data) and not_mit_mailing_list(data))):
             return data
-        raise ValidationError(mark_safe(
-                u'Your e-mail does not match any existing open organization. ' \
-                    + SIGNUP_STRING))
+        raise ValidationError(mark_safe(SIGNUP_STRING))
 
 class LoggingSetPasswordForm(SetPasswordForm):
     def save(self, commit=True):

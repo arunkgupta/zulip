@@ -11,10 +11,15 @@ Contents:
 .. toctree::
    :maxdepth: 2
 
+   integration-guide
    new-feature-tutorial
-   code-style
    directory-structure
+   code-style
    testing
+   markdown
+   queuing
+   schema-migrations
+   front-end-build-process
 
 Indices and tables
 ==================

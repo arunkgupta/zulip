@@ -1,3 +1,4 @@
+from __future__ import absolute_import
 from django.http import HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth.views import login as django_login_page
@@ -11,7 +12,7 @@ from zerver.lib.rest import rest_dispatch as _rest_dispatch
 from zerver.lib.validator import check_dict
 from zerver.models import get_realm, get_user_profile_by_email, resolve_email_to_domain, \
         UserProfile
-from error_notify import notify_server_error, notify_browser_error
+from .error_notify import notify_server_error, notify_browser_error
 from django.conf import settings
 import time
 
@@ -36,7 +37,7 @@ def get_ticket_number():
         ticket_number = int(open(fn).read()) + 1
     except:
         ticket_number = 1
-    open(fn, 'w').write('%d' % ticket_number)
+    open(fn, 'w').write('%d' % (ticket_number,))
     return ticket_number
 
 @has_request_variables
@@ -83,7 +84,7 @@ def report_error(request, deployment, type=REQ, report=REQ(validator=check_dict(
         notify_server_error(report)
     else:
         return json_error("Invalid type parameter")
-    return json_response({})
+    return json_success()
 
 def realm_for_email(email):
     try:

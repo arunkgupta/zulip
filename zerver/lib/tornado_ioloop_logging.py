@@ -1,4 +1,6 @@
 from __future__ import absolute_import
+from __future__ import division
+from typing import Tuple
 
 import logging
 import time
@@ -8,9 +10,9 @@ from django.conf import settings
 
 try:
     # Tornado 2.4
-    orig_poll_impl = ioloop._poll
+    orig_poll_impl = ioloop._poll # type: ignore # cross-version type variation is hard for mypy
     def instrument_tornado_ioloop():
-        ioloop._poll = InstrumentedPoll
+        ioloop._poll = InstrumentedPoll # type: ignore # cross-version type variation is hard for mypy
 except:
     # Tornado 3
     from tornado.ioloop import IOLoop, PollIOLoop
@@ -19,7 +21,7 @@ except:
     # be epoll.
     orig_poll_impl = select.epoll
     class InstrumentedPollIOLoop(PollIOLoop):
-        def initialize(self, **kwargs):
+        def initialize(self, **kwargs): # type: ignore # TODO investigate likely buggy monkey patching here
             super(InstrumentedPollIOLoop, self).initialize(impl=InstrumentedPoll(), **kwargs)
 
     def instrument_tornado_ioloop():
@@ -36,8 +38,8 @@ except:
 class InstrumentedPoll(object):
     def __init__(self):
         self._underlying = orig_poll_impl()
-        self._times = []
-        self._last_print = 0
+        self._times = [] # type: List[Tuple[float, float]]
+        self._last_print = 0.0
 
     # Python won't let us subclass e.g. select.epoll, so instead
     # we proxy every method.  __getattr__ handles anything we
@@ -66,9 +68,9 @@ class InstrumentedPoll(object):
         # outside poll
         if self._times and t1 - self._last_print >= 5:
             total = t1 - self._times[0][0]
-            in_poll = sum(b-a for a,b in self._times)
+            in_poll = sum(b-a for a, b in self._times)
             if total > 0:
-                percent_busy = 100 * (1 - in_poll/total)
+                percent_busy = 100 * (1 - in_poll / total)
                 if settings.PRODUCTION or percent_busy > 20:
                     logging.info('Tornado %5.1f%% busy over the past %4.1f seconds'
                         % (percent_busy, total))

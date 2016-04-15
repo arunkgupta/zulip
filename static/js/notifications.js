@@ -75,12 +75,6 @@ exports.initialize = function () {
         window_has_focus = false;
     });
 
-    if ($.browser.mozilla === true && typeof Notification !== "undefined") {
-        Notification.requestPermission(function () {
-            asked_permission_already = true;
-        });
-    }
-
     if (window.bridge !== undefined) {
         supports_sound = true;
 
@@ -110,8 +104,18 @@ exports.initialize = function () {
                 return;
             }
             if (notifications_api.checkPermission() !== 0) { // 0 is PERMISSION_ALLOWED
-                notifications_api.requestPermission(function () {});
-                asked_permission_already = true;
+                if(tutorial.is_running()) {
+                    tutorial.defer(function () {
+                        notifications_api.requestPermission(function () {
+                            asked_permission_already = true;
+                        });
+                    });
+                }
+                else {
+                    notifications_api.requestPermission(function () {
+                        asked_permission_already = true;
+                    });
+                }
             }
         });
     }
@@ -131,7 +135,7 @@ if (window.bridge !== undefined) {
     window.bridge.updateCount(0);
 }
 
-var new_message_count;
+var new_message_count = 0;
 
 exports.update_title_count = function (count) {
     new_message_count = count;
@@ -143,7 +147,9 @@ exports.redraw_title = function () {
     var n;
 
     var new_title = (new_message_count ? ("(" + new_message_count + ") ") : "")
-        + page_params.realm_name + " - " + page_params.product_name;
+        + narrow.narrow_title + " - "
+        + page_params.realm_name + " - "
+        + page_params.product_name;
 
     if (document.title === new_title) {
         return;

@@ -1,6 +1,6 @@
 class zulip::postgres_common {
   $postgres_packages = [# The database itself
-                        "postgresql-9.3",
+                        "postgresql-${zulip::base::postgres_version}",
                         # tools for database setup
                         "pgtune",
                         # tools for database monitoring
@@ -22,5 +22,14 @@ class zulip::postgres_common {
   exec { "disable_logrotate":
     command => "/usr/bin/dpkg-divert --rename --divert /etc/logrotate.d/postgresql-common.disabled --add /etc/logrotate.d/postgresql-common",
     creates => '/etc/logrotate.d/postgresql-common.disabled',
+  }
+  file { "/usr/lib/nagios/plugins/zulip_postgres_common":
+    require => Package[nagios-plugins-basic],
+    recurse => true,
+    purge => true,
+    owner => "root",
+    group => "root",
+    mode => 755,
+    source => "puppet:///modules/zulip/nagios_plugins/zulip_postgres_common",
   }
 }

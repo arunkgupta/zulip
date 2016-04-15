@@ -137,6 +137,7 @@ function report_unnarrow_time() {
     unnarrow_times = {};
 }
 
+exports.narrow_title = "home";
 exports.activate = function (raw_operators, opts) {
     var start_time = new Date();
     var was_narrowed_already = exports.active();
@@ -149,6 +150,23 @@ exports.activate = function (raw_operators, opts) {
     }
     var filter = new Filter(raw_operators);
     var operators = filter.operators();
+
+    // Take the most detailed part of the narrow to use as the title.
+    // If the operator is something other than "stream", "topic", or
+    // "is", we shouldn't update the narrow title
+    if (filter.has_operator("stream")) {
+        if (filter.has_operator("topic")) {
+            exports.narrow_title = filter.operands("topic")[0];
+        } else {
+            exports.narrow_title = filter.operands("stream")[0];
+        }
+    } else if (filter.has_operator("is")) {
+        exports.narrow_title = filter.operands("is")[0];
+    } else if (filter.has_operator("pm-with")) {
+        exports.narrow_title = "private";
+    }
+
+    notifications.redraw_title();
 
     blueslip.debug("Narrowed", {operators: _.map(operators,
                                                  function (e) { return e.operator; }),
@@ -192,7 +210,7 @@ exports.activate = function (raw_operators, opts) {
     var then_select_offset;
 
     if (!was_narrowed_already) {
-        unread_messages_read_in_narrow = false;
+        unread.messages_read_in_narrow = false;
     }
 
     if (!opts.select_first_unread && current_msg_list.get_row(then_select_id).length > 0) {
@@ -449,7 +467,7 @@ exports.deactivate = function () {
         // no longer be there
         // Additionally, we pass empty_ok as the user may have removed **all** streams
         // from her home view
-        if (unread_messages_read_in_narrow) {
+        if (unread.messages_read_in_narrow) {
             // We read some unread messages in a narrow. Instead of going back to
             // where we were before the narrow, go to our first unread message (or
             // the bottom of the feed, if there are no unread messages).
@@ -476,6 +494,9 @@ exports.deactivate = function () {
     compose_fade.update_message_list();
 
     $(document).trigger($.Event('narrow_deactivated.zulip', {msg_list: current_msg_list}));
+
+    exports.narrow_title = "home";
+    notifications.redraw_title();
 
     unnarrow_times.initial_core_time = new Date();
     setTimeout(function () {

@@ -1,3 +1,7 @@
+from __future__ import absolute_import
+from __future__ import division
+from typing import Any, Dict, List, Tuple
+
 from django.db import connection
 from django.template import RequestContext, loader
 from django.utils.html import mark_safe
@@ -15,6 +19,10 @@ import itertools
 import time
 import re
 import pytz
+from six.moves import filter
+from six.moves import map
+from six.moves import range
+from six.moves import zip
 eastern_tz = pytz.timezone('US/Eastern')
 
 def make_table(title, cols, rows, has_row_class=False):
@@ -22,7 +30,7 @@ def make_table(title, cols, rows, has_row_class=False):
     if not has_row_class:
         def fix_row(row):
             return dict(cells=row, row_class=None)
-        rows = map(fix_row, rows)
+        rows = list(map(fix_row, rows))
 
     data = dict(title=title, cols=cols, rows=rows)
 
@@ -37,7 +45,7 @@ def dictfetchall(cursor):
     "Returns all rows from a cursor as a dict"
     desc = cursor.description
     return [
-        dict(zip([col[0] for col in desc], row))
+        dict(list(zip([col[0] for col in desc], row)))
         for row in cursor.fetchall()
     ]
 
@@ -70,7 +78,7 @@ def get_realm_day_counts():
     rows = dictfetchall(cursor)
     cursor.close()
 
-    counts = defaultdict(dict)
+    counts = defaultdict(dict) # type: Dict[str, Dict[int, int]]
     for row in rows:
         counts[row['domain']][row['age']] = row['cnt']
 
@@ -132,7 +140,8 @@ def realm_summary_table(realm_minutes):
                         '/json/send_message',
                         'send_message_backend',
                         '/api/v1/send_message',
-                        '/json/update_pointer'
+                        '/json/update_pointer',
+                        '/json/users/me/pointer'
                     )
                 AND
                     last_visit > now() - interval '1 day'
@@ -161,8 +170,9 @@ def realm_summary_table(realm_minutes):
                         ua.query in (
                             '/json/send_message',
                             'send_message_backend',
-                           '/api/v1/send_message',
-                            '/json/update_pointer'
+                            '/api/v1/send_message',
+                            '/json/update_pointer',
+                            '/json/users/me/pointer'
                         )
                     GROUP by realm.id, up.email
                     HAVING max(last_visit) between
@@ -182,7 +192,8 @@ def realm_summary_table(realm_minutes):
                         '/json/send_message',
                         '/api/v1/send_message',
                         'send_message_backend',
-                        '/json/update_pointer'
+                        '/json/update_pointer',
+                        '/json/users/me/pointer'
                     )
                 AND
                     up.realm_id = realm.id
@@ -226,7 +237,7 @@ def realm_summary_table(realm_minutes):
     def meets_goal(row):
         return row['active_user_count'] >= 5
 
-    num_active_sites = len(filter(meets_goal, rows))
+    num_active_sites = len(list(filter(meets_goal, rows)))
 
     # create totals
     total_active_user_count = 0
@@ -375,7 +386,7 @@ def ad_hoc_queries():
         cursor = connection.cursor()
         cursor.execute(query)
         rows = cursor.fetchall()
-        rows = map(list, rows)
+        rows = list(map(list, rows))
         cursor.close()
 
         def fix_rows(i, fixup_func):
@@ -609,12 +620,13 @@ def raw_user_activity_table(records):
                 format_date_for_activity_reports(record.last_visit)
         ]
 
-    rows = map(row, records)
+    rows = list(map(row, records))
     title = 'Raw Data'
     return make_table(title, cols, rows)
 
 def get_user_activity_summary(records):
-    summary = {}
+    # type: (Any) -> Any
+    summary = {} # type: Dict[str, Dict[str, Any]]
     def update(action, record):
         if action not in summary:
             summary[action] = dict(
@@ -649,7 +661,7 @@ def get_user_activity_summary(records):
             update('website', record)
         if ('send_message' in query) or re.search('/api/.*/external/.*', query):
             update('send', record)
-        if query in ['/json/update_pointer', '/api/v1/update_pointer']:
+        if query in ['/json/update_pointer', '/json/users/me/pointer', '/api/v1/update_pointer']:
             update('pointer', record)
         update(client, record)
 
@@ -811,9 +823,9 @@ def realm_user_summary_table(all_records, admin_emails):
 
 @zulip_internal
 def get_realm_activity(request, realm):
-    data = []
-    all_records = {}
-    all_user_records = {}
+    # type: (Any, Any) -> Any
+    data = [] # type: List[Tuple[str, str]]
+    all_user_records = {} # type: Dict[str, Any]
 
     try:
         admins = get_realm(realm).get_admin_users()
@@ -823,8 +835,7 @@ def get_realm_activity(request, realm):
     admin_emails = {admin.email for admin in admins}
 
     for is_bot, page_title in [(False,  'Humans'), (True, 'Bots')]:
-        all_records = get_user_activity_records_for_realm(realm, is_bot)
-        all_records = list(all_records)
+        all_records = list(get_user_activity_records_for_realm(realm, is_bot))
 
         user_records, content = realm_user_summary_table(all_records, admin_emails)
         all_user_records.update(user_records)
@@ -856,7 +867,7 @@ def get_realm_activity(request, realm):
 def get_user_activity(request, email):
     records = get_user_activity_records_for_email(email)
 
-    data = []
+    data = [] # type: List[Tuple[str, str]]
     user_summary = get_user_activity_summary(records)
     content = user_activity_summary_table(user_summary)
 

@@ -339,7 +339,7 @@ exports.initialize = function () {
         $("#new_message_content").focus();
 
         return channel.post({
-            url: '/json/change_enter_sends',
+            url: '/json/users/me/enter-sends',
             idempotent: true,
             data: {'enter_sends': page_params.enter_sends}
         });
@@ -377,7 +377,7 @@ exports.initialize = function () {
         fixed: true,
         highlighter: composebox_typeahead_highlighter,
         sorter: function (items) {
-            var sorted = typeahead_helper.sorter(this.query, items, function (x){return x;});
+            var sorted = typeahead_helper.sorter(this.query, items, function (x) {return x;});
             if (sorted.length > 0 && sorted.indexOf(this.query) === -1) {
                 sorted.unshift(this.query);
             }

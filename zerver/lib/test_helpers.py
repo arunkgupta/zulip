@@ -1,7 +1,11 @@
+from __future__ import absolute_import
+from typing import Any, Callable, Generator, Iterable, Tuple
+
 from django.test import TestCase
 
 from zerver.lib.initial_password import initial_password
 from zerver.lib.db import TimeTrackingCursor
+from zerver.lib.handlers import allocate_handler_id
 from zerver.lib import cache
 from zerver.lib import event_queue
 from zerver.worker import queue_processors
@@ -11,8 +15,11 @@ from zerver.lib.actions import (
     get_display_recipient,
 )
 
+from zerver.lib.handlers import allocate_handler_id
+
 from zerver.models import (
     get_realm,
+    get_stream,
     get_user_profile_by_email,
     resolve_email_to_domain,
     Client,
@@ -29,14 +36,16 @@ import os
 import re
 import time
 import ujson
-import urllib
+from six.moves import urllib
 
 from contextlib import contextmanager
+import six
 
-API_KEYS = {}
+API_KEYS = {} # type: Dict[str, str]
 
 @contextmanager
 def stub(obj, name, f):
+    # type: (Any, str, Callable[..., Any]) -> Generator[None, None, None]
     old_f = getattr(obj, name)
     setattr(obj, name, f)
     yield
@@ -44,13 +53,15 @@ def stub(obj, name, f):
 
 @contextmanager
 def simulated_queue_client(client):
+    # type: (Any) -> Generator[None, None, None]
     real_SimpleQueueClient = queue_processors.SimpleQueueClient
-    queue_processors.SimpleQueueClient = client
+    queue_processors.SimpleQueueClient = client # type: ignore # https://github.com/JukkaL/mypy/issues/1152
     yield
-    queue_processors.SimpleQueueClient = real_SimpleQueueClient
+    queue_processors.SimpleQueueClient = real_SimpleQueueClient # type: ignore # https://github.com/JukkaL/mypy/issues/1152
 
 @contextmanager
 def tornado_redirected_to_list(lst):
+    # type: (List) -> Generator[None, None, None]
     real_event_queue_process_notification = event_queue.process_notification
     event_queue.process_notification = lst.append
     yield
@@ -58,6 +69,7 @@ def tornado_redirected_to_list(lst):
 
 @contextmanager
 def simulated_empty_cache():
+    # type: () -> Generator[List[Tuple[str, str, str]], None, None]
     cache_queries = []
     def my_cache_get(key, cache_name=None):
         cache_queries.append(('get', key, cache_name))
@@ -77,6 +89,7 @@ def simulated_empty_cache():
 
 @contextmanager
 def queries_captured():
+    # type: () -> Generator[List[Dict[str, str]], None, None]
     '''
     Allow a user to capture just the queries executed during
     the with statement.
@@ -100,17 +113,17 @@ def queries_captured():
     old_executemany = TimeTrackingCursor.executemany
 
     def cursor_execute(self, sql, params=()):
-        return wrapper_execute(self, super(TimeTrackingCursor, self).execute, sql, params)
-    TimeTrackingCursor.execute = cursor_execute
+        return wrapper_execute(self, super(TimeTrackingCursor, self).execute, sql, params)  # type: ignore # https://github.com/JukkaL/mypy/issues/1167
+    TimeTrackingCursor.execute = cursor_execute # type: ignore # https://github.com/JukkaL/mypy/issues/1167
 
     def cursor_executemany(self, sql, params=()):
-        return wrapper_execute(self, super(TimeTrackingCursor, self).executemany, sql, params)
-    TimeTrackingCursor.executemany = cursor_executemany
+        return wrapper_execute(self, super(TimeTrackingCursor, self).executemany, sql, params)  # type: ignore # https://github.com/JukkaL/mypy/issues/1167
+    TimeTrackingCursor.executemany = cursor_executemany # type: ignore # https://github.com/JukkaL/mypy/issues/1167
 
     yield queries
 
-    TimeTrackingCursor.execute = old_execute
-    TimeTrackingCursor.executemany = old_executemany
+    TimeTrackingCursor.execute = old_execute # type: ignore # https://github.com/JukkaL/mypy/issues/1167
+    TimeTrackingCursor.executemany = old_executemany # type: ignore # https://github.com/JukkaL/mypy/issues/1167
 
 
 def find_key_by_email(address):
@@ -147,18 +160,19 @@ def get_user_messages(user_profile):
         order_by('message')
     return [um.message for um in query]
 
-class DummyObject:
+class DummyObject(object):
     pass
 
-class DummyTornadoRequest:
+class DummyTornadoRequest(object):
     def __init__(self):
         self.connection = DummyObject()
-        self.connection.stream = DummyStream()
+        self.connection.stream = DummyStream() # type: ignore # monkey-patching here
 
 class DummyHandler(object):
     def __init__(self, assert_callback):
         self.assert_callback = assert_callback
         self.request = DummyTornadoRequest()
+        allocate_handler_id(self)
 
     # Mocks RequestHandler.async_callback, which wraps a callback to
     # handle exceptions.  We return the callback as-is.
@@ -176,7 +190,7 @@ class DummyHandler(object):
 class DummySession(object):
     session_key = "0"
 
-class DummyStream:
+class DummyStream(object):
     def closed(self):
         return False
 
@@ -188,20 +202,19 @@ class POSTRequestMock(object):
         self.user = user_profile
         self._tornado_handler = DummyHandler(assert_callback)
         self.session = DummySession()
-        self._log_data = {}
+        self._log_data = {} # type: Dict[str, Any]
         self.META = {'PATH_INFO': 'test'}
-        self._log_data = {}
 
 class AuthedTestCase(TestCase):
     # Helper because self.client.patch annoying requires you to urlencode
     def client_patch(self, url, info={}, **kwargs):
-        info = urllib.urlencode(info)
+        info = urllib.parse.urlencode(info)
         return self.client.patch(url, info, **kwargs)
     def client_put(self, url, info={}, **kwargs):
-        info = urllib.urlencode(info)
+        info = urllib.parse.urlencode(info)
         return self.client.put(url, info, **kwargs)
     def client_delete(self, url, info={}, **kwargs):
-        info = urllib.urlencode(info)
+        info = urllib.parse.urlencode(info)
         return self.client.delete(url, info, **kwargs)
 
     def login(self, email, password=None):
@@ -256,7 +269,7 @@ class AuthedTestCase(TestCase):
             message_type_name = "private"
         else:
             message_type_name = "stream"
-        if isinstance(recipient_list, basestring):
+        if isinstance(recipient_list, six.string_types):
             recipient_list = [recipient_list]
         (sending_client, _) = Client.objects.get_or_create(name="test suite")
 
@@ -268,7 +281,7 @@ class AuthedTestCase(TestCase):
     def get_old_messages(self, anchor=1, num_before=100, num_after=100):
         post_params = {"anchor": anchor, "num_before": num_before,
                        "num_after": num_after}
-        result = self.client.post("/json/get_old_messages", dict(post_params))
+        result = self.client.get("/json/messages", dict(post_params))
         data = ujson.loads(result.content)
         return data['messages']
 
@@ -319,12 +332,14 @@ class AuthedTestCase(TestCase):
 
     def fixture_data(self, type, action, file_type='json'):
         return open(os.path.join(os.path.dirname(__file__),
-                                 "../fixtures/%s/%s_%s.%s" % (type, type, action,file_type))).read()
+                                 "../fixtures/%s/%s_%s.%s" % (type, type, action, file_type))).read()
 
     # Subscribe to a stream directly
     def subscribe_to_stream(self, email, stream_name, realm=None):
         realm = get_realm(resolve_email_to_domain(email))
-        stream, _ = create_stream_if_needed(realm, stream_name)
+        stream = get_stream(stream_name, realm)
+        if stream is None:
+            stream, _ = create_stream_if_needed(realm, stream_name)
         user_profile = get_user_profile_by_email(email)
         do_add_subscription(user_profile, stream, no_log=True)
 

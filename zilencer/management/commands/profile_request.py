@@ -1,9 +1,10 @@
 from __future__ import absolute_import
+from typing import Any, Dict
 
 from optparse import make_option
 from django.core.management.base import BaseCommand
 from zerver.models import get_user_profile_by_email, UserMessage
-from zerver.views.old_messages import get_old_messages_backend
+from zerver.views.messages import get_old_messages_backend
 import cProfile
 import logging
 from zerver.middleware import LogRequests
@@ -23,7 +24,7 @@ class MockRequest(object):
         self.REQUEST = {"anchor": UserMessage.objects.filter(user_profile=self.user).order_by("-message")[200].message_id,
                         "num_before": 1200,
                         "num_after": 200}
-        self.GET = {}
+        self.GET = {} # type: Dict[Any, Any]
         self.session = MockSession()
 
     def get_full_path(self):
